@@ -8,10 +8,10 @@ help:
 	@echo "  make clean    - 수집된 데이터 삭제"
 
 fetch:
-	uv run python fetch_data.py
+	uv run python fetch_data.py | tee log-fetch.log
 
 analyze:
-	uv run python analyze.py
+	uv run python analyze.py | tee log-analyze.log
 
 all: fetch analyze
 

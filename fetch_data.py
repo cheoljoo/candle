@@ -1,7 +1,8 @@
 """
 fetch_data.py
-KOSPI 상위 200 종목의 일봉 종가 데이터를 data/ 디렉터리에 저장합니다.
-같은 날 재실행해도 이미 오늘 날짜 데이터가 있으면 네트워크 요청을 건너뜁니다.
+KOSPI 상위 200 종목 · S&P500 전 종목 · 주요 ETF의
+일봉 종가 데이터를 data/ 디렉터리에 저장합니다.
+당일 데이터가 이미 있으면 스킵(증분 수집)합니다.
 """
 
 import FinanceDataReader as fdr
@@ -9,94 +10,123 @@ import pandas as pd
 from datetime import date, timedelta
 from pathlib import Path
 
-DATA_DIR = Path(__file__).parent / "data"
-STOCKS_DIR = DATA_DIR / "stocks"
+DATA_DIR        = Path(__file__).parent / "data"
+STOCKS_DIR      = DATA_DIR / "stocks"       # KOSPI
+US_STOCKS_DIR   = DATA_DIR / "stocks_us"    # S&P500 + ETF
 KOSPI_LIST_FILE = DATA_DIR / "kospi_list.csv"
+SP500_LIST_FILE = DATA_DIR / "sp500_list.csv"
 
-DATA_DIR.mkdir(exist_ok=True)
-STOCKS_DIR.mkdir(exist_ok=True)
+ETF_SYMBOLS = ['VOO', 'SPY', 'QQQ', 'SCHD', 'JEPI', 'SOXX', 'XLE']
 
-
-def fetch_kospi_list() -> pd.DataFrame:
-    """KOSPI 종목 목록을 가져와 저장하고 반환합니다."""
-    print("KOSPI 종목 목록을 가져오는 중...")
-    df = fdr.StockListing('KOSPI')
-    df.to_csv(KOSPI_LIST_FILE, index=False, encoding='utf-8-sig')
-    print(f"  → {len(df)}개 종목 저장 완료: {KOSPI_LIST_FILE}")
-    return df
+for _d in [DATA_DIR, STOCKS_DIR, US_STOCKS_DIR]:
+    _d.mkdir(exist_ok=True)
 
 
-def load_existing(code: str) -> pd.DataFrame | None:
-    """저장된 일봉 데이터를 불러옵니다. 없으면 None 반환."""
-    path = STOCKS_DIR / f"{code}.csv"
+def _load_csv(path: Path) -> pd.DataFrame | None:
+    """저장된 CSV 일봉 파일 로드. 없으면 None 반환."""
     if not path.exists():
         return None
-    df = pd.read_csv(path, index_col=0, parse_dates=True)
-    return df
+    return pd.read_csv(path, index_col=0, parse_dates=True)
 
 
-def fetch_stock(code: str, name: str, today: date) -> bool:
+def compute_ma10m(close_series: pd.Series) -> pd.Series:
+    """월말 종가 기준 10개월 이동평균을 일봉 인덱스로 forward-fill하여 반환."""
+    monthly = close_series.resample('ME').last().dropna()
+    ma10_monthly = monthly.rolling(window=10).mean()
+    return ma10_monthly.reindex(close_series.index, method='ffill')
+
+
+def fetch_stock_data(symbol: str, name: str, today: date, stocks_dir: Path) -> bool | None:
     """
-    종목 일봉 데이터를 업데이트합니다.
-    이미 오늘 데이터가 있으면 스킵(False 반환), 갱신하면 True 반환.
+    일봉 종가 + 10월이평(MA10M) 데이터를 증분 수집해 CSV에 저장.
+    True: 갱신 완료 / False: 이미 최신(스킵) / None: 오류
+
+    CSV 컬럼: Date(index), Close, MA10M
+    MA10M: 월말 종가 기준 10개월 이동평균을 일봉 인덱스에 forward-fill
     """
-    path = STOCKS_DIR / f"{code}.csv"
-    existing = load_existing(code)
+    path = stocks_dir / f"{symbol}.csv"
+    existing = _load_csv(path)
 
     if existing is not None and not existing.empty:
         last_date = existing.index[-1].date()
         if last_date >= today:
-            return False  # 이미 최신 데이터 보유
+            # 이미 당일 데이터 존재 — MA10M 컬럼이 없으면 보완 후 저장
+            if 'MA10M' not in existing.columns:
+                existing['MA10M'] = compute_ma10m(existing['Close'])
+                existing.to_csv(path, encoding='utf-8-sig')
+            return False
         start = last_date + timedelta(days=1)
     else:
-        start = None  # 전체 기간 신규 수집
+        start = None
 
     try:
-        df_new = fdr.DataReader(code, start=start.strftime('%Y-%m-%d') if start else None)
+        df_new = fdr.DataReader(
+            symbol,
+            start=start.strftime('%Y-%m-%d') if start else None,
+        )
         if df_new is None or df_new.empty:
-            return False
+            return None
 
-        # 종가(Close) 컬럼만 유지
         df_new = df_new[['Close']].dropna()
 
         if existing is not None and not existing.empty:
-            df_combined = pd.concat([existing, df_new])
+            # Close 컬럼만 가져와서 합산 (기존 MA10M 컬럼은 버리고 재계산)
+            df_combined = pd.concat([existing[['Close']], df_new])
             df_combined = df_combined[~df_combined.index.duplicated(keep='last')]
         else:
             df_combined = df_new
 
         df_combined.sort_index(inplace=True)
+        df_combined['MA10M'] = compute_ma10m(df_combined['Close'])
         df_combined.to_csv(path, encoding='utf-8-sig')
         return True
 
     except Exception as e:
-        print(f"  [오류] {name}({code}): {e}")
-        return False
+        print(f"  [오류] {name}({symbol}): {e}")
+        return None
+
+
+def _batch_fetch(pairs: list[tuple[str, str]], stocks_dir: Path, today: date, label: str):
+    """(symbol, name) 목록을 일괄 수집하고 요약을 출력."""
+    updated = skipped = failed = 0
+    for symbol, name in pairs:
+        result = fetch_stock_data(symbol, name, today, stocks_dir)
+        if result is True:
+            print(f"  [갱신] {name}({symbol})")
+            updated += 1
+        elif result is False:
+            skipped += 1
+        else:
+            failed += 1
+    print(f"  {label} 완료 — 갱신 {updated}개 / 스킵 {skipped}개 / 오류 {failed}개\n")
 
 
 def main():
     today = date.today()
     print(f"=== 데이터 수집 시작 (기준일: {today}) ===\n")
 
-    # 종목 목록 (항상 최신으로 갱신)
-    kospi_df = fetch_kospi_list()
-    top200 = kospi_df.head(200)
+    # ── KOSPI 상위 200 ────────────────────────────────────────────
+    print("KOSPI 종목 목록을 가져오는 중...")
+    kospi_df = fdr.StockListing('KOSPI')
+    kospi_df.to_csv(KOSPI_LIST_FILE, index=False, encoding='utf-8-sig')
+    print(f"  → {len(kospi_df)}개 종목 저장 완료")
+    kospi_pairs = [(str(r['Code']), str(r['Name'])) for _, r in kospi_df.head(200).iterrows()]
+    _batch_fetch(kospi_pairs, STOCKS_DIR, today, "KOSPI 상위 200")
 
-    updated, skipped, failed = 0, 0, 0
+    # ── S&P500 ────────────────────────────────────────────────────
+    print("S&P500 종목 목록을 가져오는 중...")
+    sp500_df = fdr.StockListing('S&P500')
+    sp500_df.to_csv(SP500_LIST_FILE, index=False, encoding='utf-8-sig')
+    print(f"  → {len(sp500_df)}개 종목 저장 완료")
+    sp500_pairs = [(str(r['Symbol']), str(r['Name'])) for _, r in sp500_df.iterrows()]
+    _batch_fetch(sp500_pairs, US_STOCKS_DIR, today, "S&P500")
 
-    for _, row in top200.iterrows():
-        code = row['Code']
-        name = row['Name']
-        result = fetch_stock(code, name, today)
-        if result is True:
-            print(f"  [갱신] {name}({code})")
-            updated += 1
-        elif result is False:
-            skipped += 1
-        else:
-            failed += 1
+    # ── ETF ──────────────────────────────────────────────────────
+    print("ETF 데이터 수집 중...")
+    etf_pairs = [(sym, sym) for sym in ETF_SYMBOLS]
+    _batch_fetch(etf_pairs, US_STOCKS_DIR, today, "ETF")
 
-    print(f"\n=== 완료: 갱신 {updated}개 / 스킵 {skipped}개 / 오류 {failed}개 ===")
+    print("=== 전체 수집 완료 ===")
 
 
 if __name__ == "__main__":
