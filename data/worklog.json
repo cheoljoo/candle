@@ -51,5 +51,37 @@
       }
     ],
     "project": "CANDLE"
+  },
+  {
+    "date": "2026-04-11",
+    "start": "11:16",
+    "end": "12:17",
+    "duration": "1h 1m",
+    "tool": "copilot-cli",
+    "session_id": "f2c11256-1494-4558-ae54-888c7b541e32",
+    "tasks": [
+      {
+        "title": "Type1 백테스트 초기 구현",
+        "detail": "backtest_type1.py를 추가해 MA10M 교차 기준 10주 매수/전량 매도 규칙으로 KOSPI 200, S&P500, ETF 백테스트를 구현하고 README/Makefile 기본 구조를 정리",
+        "start": "11:16",
+        "end": "11:34",
+        "duration": "0h 18m"
+      },
+      {
+        "title": "평가 기준일 및 CLI 정리",
+        "detail": "--from, --to, --output_csv 인자를 추가하고 --to를 평가기준일로 통일했다. Makefile 프리셋과 README, --help 설명도 함께 맞췄다.",
+        "start": "11:34",
+        "end": "11:53",
+        "duration": "0h 19m"
+      },
+      {
+        "title": "수익 지표 확장 및 그룹 합계 추가",
+        "detail": "사고판수익/사고판수익률을 닫힌 거래만 기준으로 분리하고, 평가가격일·기본 CSV 출력·그룹별 합계 행을 추가했다.",
+        "start": "11:53",
+        "end": "12:17",
+        "duration": "0h 24m"
+      }
+    ],
+    "project": "CANDLE"
   }
 ]

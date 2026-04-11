@@ -1,3 +1,9 @@
+## 2026-04-11 11:16 ~ 12:17 (1h 1m) [tool: copilot-cli / session: f2c11256-1494-4558-ae54-888c7b541e32]
+- `backtest_type1.py` 추가: MA10M `-→+` 10주 매수 / `+→-` 전량 매도 규칙으로 KOSPI 200, S&P500, ETF 백테스트 구현
+- 평가 기준 정리: `--from`, `--to`, `--output_csv` CLI 추가, `--to`를 평가기준일로 사용하고 평가가격일 별도 기록
+- 지표 확장: 사고판수익/사고판수익률(닫힌 거래만), 총손익/수익률(평가손익 포함), 그룹별 합계 행 추가
+- 실행 환경 정리: `Makefile`에 type1 프리셋 타겟 추가, `README.md`와 `--help`에 사용법/기준/출력 컬럼 문서화
+
 ## 2026-04-10 17:43 ~ 21:56 (4h 13m) [tool: copilot-cli / session: 18954c03-67a8-46b8-8d43-e2ff49c8dfa3]
 - main.py 실행 환경 구성: `finance-datareader`, `pandas` 의존성 설치 (uv add)
 - `fdr.DataReader(unit='M')` API 변경 대응 → 일봉 resample('ME')로 월봉 계산하도록 수정
@@ -22,4 +28,3 @@
 - 변곡점 테이블에 10월이평 컬럼 추가
 - sort_values float/str 혼재 TypeError 수정 (key=pd.to_numeric)
 - 변곡점 종목 data/inflection_points.csv 파일 저장 기능 추가 (기준일·그룹 컬럼 포함)
-
