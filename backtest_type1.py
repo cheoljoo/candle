@@ -121,8 +121,13 @@ def load_price_frame(path: Path) -> pd.DataFrame | None:
         if "MA10M" in df.columns
         else compute_ma10m(close)
     )
+    volume = (
+        pd.to_numeric(df["Volume"], errors="coerce")
+        if "Volume" in df.columns
+        else pd.Series(index=df.index, dtype="float64")
+    )
 
-    price_df = pd.DataFrame({"Close": close, "MA10M": ma10m}).dropna(subset=["Close"])
+    price_df = pd.DataFrame({"Close": close, "Volume": volume, "MA10M": ma10m}).dropna(subset=["Close"])
     if price_df.empty:
         return None
 

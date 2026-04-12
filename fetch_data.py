@@ -1,7 +1,7 @@
 """
 fetch_data.py
 KOSPI 상위 200 종목 · S&P500 전 종목 · 주요 ETF의
-일봉 종가 데이터를 data/ 디렉터리에 저장합니다.
+일봉 종가/거래량 데이터를 data/ 디렉터리에 저장합니다.
 당일 데이터가 이미 있으면 스킵(증분 수집)합니다.
 """
 
@@ -36,12 +36,26 @@ def compute_ma10m(close_series: pd.Series) -> pd.Series:
     return ma10_monthly.reindex(close_series.index, method='ffill')
 
 
+def normalize_price_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """DataReader 결과를 Close/Volume/MA10M 형식으로 정리."""
+    close = pd.to_numeric(df["Close"], errors="coerce")
+    volume = (
+        pd.to_numeric(df["Volume"], errors="coerce")
+        if "Volume" in df.columns
+        else pd.Series(index=df.index, dtype="float64")
+    )
+    price_df = pd.DataFrame({"Close": close, "Volume": volume}, index=df.index).dropna(subset=["Close"])
+    price_df.sort_index(inplace=True)
+    price_df["MA10M"] = compute_ma10m(price_df["Close"])
+    return price_df
+
+
 def fetch_stock_data(symbol: str, name: str, today: date, stocks_dir: Path) -> bool | None:
     """
-    일봉 종가 + 10월이평(MA10M) 데이터를 증분 수집해 CSV에 저장.
+    일봉 종가 + 거래량 + 10월이평(MA10M) 데이터를 증분 수집해 CSV에 저장.
     True: 갱신 완료 / False: 이미 최신(스킵) / None: 오류
 
-    CSV 컬럼: Date(index), Close, MA10M
+    CSV 컬럼: Date(index), Close, Volume, MA10M
     MA10M: 월말 종가 기준 10개월 이동평균을 일봉 인덱스에 forward-fill
     """
     path = stocks_dir / f"{symbol}.csv"
@@ -49,13 +63,10 @@ def fetch_stock_data(symbol: str, name: str, today: date, stocks_dir: Path) -> b
 
     if existing is not None and not existing.empty:
         last_date = existing.index[-1].date()
-        if last_date >= today:
-            # 이미 당일 데이터 존재 — MA10M 컬럼이 없으면 보완 후 저장
-            if 'MA10M' not in existing.columns:
-                existing['MA10M'] = compute_ma10m(existing['Close'])
-                existing.to_csv(path, encoding='utf-8-sig')
+        needs_backfill = "MA10M" not in existing.columns or "Volume" not in existing.columns
+        if last_date >= today and not needs_backfill:
             return False
-        start = last_date + timedelta(days=1)
+        start = existing.index[0].date() if needs_backfill else last_date + timedelta(days=1)
     else:
         start = None
 
@@ -67,17 +78,16 @@ def fetch_stock_data(symbol: str, name: str, today: date, stocks_dir: Path) -> b
         if df_new is None or df_new.empty:
             return None
 
-        df_new = df_new[['Close']].dropna()
+        df_new = normalize_price_frame(df_new)
 
         if existing is not None and not existing.empty:
-            # Close 컬럼만 가져와서 합산 (기존 MA10M 컬럼은 버리고 재계산)
-            df_combined = pd.concat([existing[['Close']], df_new])
+            existing = normalize_price_frame(existing)
+            df_combined = pd.concat([existing[["Close", "Volume"]], df_new[["Close", "Volume"]]])
             df_combined = df_combined[~df_combined.index.duplicated(keep='last')]
         else:
-            df_combined = df_new
+            df_combined = df_new[["Close", "Volume"]]
 
-        df_combined.sort_index(inplace=True)
-        df_combined['MA10M'] = compute_ma10m(df_combined['Close'])
+        df_combined = normalize_price_frame(df_combined)
         df_combined.to_csv(path, encoding='utf-8-sig')
         return True
 

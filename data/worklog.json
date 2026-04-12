@@ -55,8 +55,8 @@
   {
     "date": "2026-04-11",
     "start": "11:16",
-    "end": "12:17",
-    "duration": "1h 1m",
+    "end": "19:24",
+    "duration": "8h 8m",
     "tool": "copilot-cli",
     "session_id": "f2c11256-1494-4558-ae54-888c7b541e32",
     "tasks": [
@@ -80,6 +80,88 @@
         "start": "11:53",
         "end": "12:17",
         "duration": "0h 24m"
+      },
+      {
+        "title": "원인 분석 및 구간 지속 길이 분석",
+        "detail": "backtest_reason.py를 추가해 상/하위 수익률 종목의 차이, 첫 매수일, 거래량 배수, +/− 구간 지속 길이와 전환 빈도를 분석했다.",
+        "start": "12:17",
+        "end": "19:16",
+        "duration": "6h 59m"
+      },
+      {
+        "title": "현재 + 40거래일 이상 종목 집계 및 문서화",
+        "detail": "현재 거래일 기준 MA10M 위(+) 상태가 40거래일 이상인 종목을 집계해 data/current_plus_40.csv를 만들고, report.md 및 worklog instruction에 반영했다.",
+        "start": "19:16",
+        "end": "19:24",
+        "duration": "0h 8m"
+      }
+    ],
+    "project": "CANDLE"
+  },
+  {
+    "date": "2026-04-12",
+    "start": "01:07",
+    "end": "01:28",
+    "duration": "0h 21m",
+    "tool": "copilot-cli",
+    "session_id": "f2c11256-1494-4558-ae54-888c7b541e32",
+    "tasks": [
+      {
+        "title": "Type2 파라미터 탐색",
+        "detail": "plus_days/minus_days 1~40 전수 탐색으로 총수익 최적안(23/40)과 실전형 균형안(33/5)을 구분해 정리했다.",
+        "start": "01:07",
+        "end": "01:17",
+        "duration": "0h 10m"
+      },
+      {
+        "title": "실전형 종목 선정 및 운용 규칙 정리",
+        "detail": "KOSPI 시총/배당률과 현재 +연속일수, 전환 빈도, 매수 횟수를 조합해 시장별 core/watchlist 후보와 주간 rotation 규칙을 report.md에 정리했다. 거래량 이력 부재 한계도 함께 명시했다.",
+        "start": "01:17",
+        "end": "01:28",
+        "duration": "0h 11m"
+      }
+    ],
+    "project": "CANDLE"
+  },
+  {
+    "date": "2026-04-12",
+    "start": "23:01",
+    "end": "23:26",
+    "duration": "0h 25m",
+    "tool": "copilot-cli",
+    "session_id": "f2c11256-1494-4558-ae54-888c7b541e32",
+    "tasks": [
+      {
+        "title": "거래량 저장 및 type2 거래량 분석",
+        "detail": "fetch_data.py에 Volume 저장을 추가하고 backtest_type2.py 출력에 평가거래량/20일평균거래량/거래량배수를 반영했다. 이후 실전형 33/5 기준으로 거래량과 성과의 관계를 분석해 거래량은 보조 신호에 가깝다고 정리했다.",
+        "start": "23:01",
+        "end": "23:10",
+        "duration": "0h 9m"
+      },
+      {
+        "title": "동일 초기자금 비교 및 type4 구현",
+        "detail": "backtest_compare.py를 추가해 type1/type2/type3 현재 총자산 비교를 구현하고, 시가총액 상위 조건 기반 backtest_type4.py 및 compare 내 type4 비교를 추가했다. 현재 type4 자금은 30/100 분할 총자금이 아니라 종목당 초기자금을 그대로 쓰는 방식임을 문서화했다.",
+        "start": "23:10",
+        "end": "23:26",
+        "duration": "0h 16m"
+      }
+    ],
+    "project": "CANDLE"
+  },
+  {
+    "date": "2026-04-12",
+    "start": "23:37",
+    "end": "23:43",
+    "duration": "0h 6m",
+    "tool": "copilot-cli",
+    "session_id": "f2c11256-1494-4558-ae54-888c7b541e32",
+    "tasks": [
+      {
+        "title": "Type4 시작 시점 매수 규칙 보정",
+        "detail": "backtest_type4.py가 기간 시작일부터 이미 + 인 종목을 바로 매수하던 동작을 수정해, type1과 동일하게 기간 안에서 -→+ 전환이 발생할 때만 매수하도록 바꿨다. 삼성전자(005930)를 기준으로 type1/type4의 사고·파는 횟수가 다시 일치함을 확인했다.",
+        "start": "23:37",
+        "end": "23:43",
+        "duration": "0h 6m"
       }
     ],
     "project": "CANDLE"

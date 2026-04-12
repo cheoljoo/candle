@@ -1,5 +1,5 @@
 ---
-description: "일을 정리 해주세요" 트리거 — README, worklog, lessons 자동 정리
+description: "일을 정리 해주세요" 트리거 — README, report, worklog, lessons 자동 정리
 ---
 
 # 스킬: 작업 정리
@@ -46,7 +46,11 @@ description: "일을 정리 해주세요" 트리거 — README, worklog, lessons
 - 프로젝트의 중요한 기능 추가와 같은 내용에 대해서 `README.md`를 업데이트한다.
 - 단순 시간단위의 변화에 대해서는 worklog.md와 data/worklog.json에만 업데이트한다.
 
-## 작업 2 — worklog.md에 작업 내역 추가 (이번 달 파일)
+## 작업 2 — report.md 업데이트
+- 세션에서 나온 **핵심 결과, 수치, 분석 과정, 재현 방법**을 `report.md` 에 정리한다.
+- 이미 파일이 있으면 최신 결과 중심으로 갱신하고, 없으면 새로 생성한다.
+
+## 작업 3 — worklog.md에 작업 내역 추가 (이번 달 파일)
 - `worklog.md` 파일 **맨 위에** 추가한다.
 - 형식:
   ```
@@ -55,7 +59,7 @@ description: "일을 정리 해주세요" 트리거 — README, worklog, lessons
   - 작업 내용 2
   ```
 
-## 작업 3 — data/worklog.json에 구조화 데이터 추가 (이번 달 파일)
+## 작업 4 — data/worklog.json에 구조화 데이터 추가 (이번 달 파일)
 - `data/worklog.json` 배열에 항목을 **append** 한다.
 - 형식:
   ```json
@@ -73,14 +77,14 @@ description: "일을 정리 해주세요" 트리거 — README, worklog, lessons
   }
   ```
 
-## 작업 4 — lessons.md에 중요 교훈 기록
+## 작업 5 — lessons.md에 중요 교훈 기록
 - 형식:
   ```
   ## YYYY-MM-DD — [주제]
   - 교훈 내용
   ```
 
-## 작업 5 — mm.md에 commit msg 기록
+## 작업 6 — mm.md에 commit msg 기록
 - git 내용과 비교하여 추가된 내용들을 적어달라.
 - 형식:
   ```
@@ -109,6 +113,7 @@ cat worklog/*.md worklog.md 2>/dev/null | less
 ## 파일 구조 (참고)
 ```
 worklog.md                  ← 이번 달만
+report.md                   ← 최신 분석/결과 요약
 worklog/
   2026-03.md                ← 지난달 아카이브
   2026-02.md
