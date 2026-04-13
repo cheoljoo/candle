@@ -1,4 +1,13 @@
-## 2026-04-12 23:37 ~ 23:43 (0h 6m) [tool: copilot-cli / session: f2c11256-1494-4558-ae54-888c7b541e32]
+## 2026-04-13 13:45 ~ 15:04 (1h 19m) [tool: copilot-cli / session: ce03f93f-77b2-4490-9159-eb0aa68cbc49]
+- `backtest_type4.py` 정리: 중복 함수(`normalize_symbol`, `fetch_us_marketcap_table`) 제거 후 `fetch_data` 에서 임포트, `매수일_시총순위` 컬럼 추가
+- `backtest_compare.py` 확장: `최고전략_매수일_시총순위` 컬럼 추가 (최고 전략의 마지막 매수일 당시 시총 순위)
+- `backtest_type1_2.py` 신규 생성: 현금 추적 type1 변형 — 첫 매수로 초기 자본 설정, 이후 보유 현금으로 최대 주수 매수
+- `backtest_type4_2.py` 신규 생성: type4 시총 조건 + 현금 추적 변형
+- `Makefile` 업데이트: `backtest-type1-2`, `backtest-type4-2` 타겟 추가
+- `backtest_compare.py`: type1_2/type4_2 전략 비교 추가 (6개 전략으로 확장), 가변 초기자본 집계 수정
+- KOSPI 200 수익률 vs 시가총액 상관관계 분석: 피어슨 +0.071, 스피어만 +0.310 (약한 양의 상관), Q4 평균 38.5% vs Q1 14.3%
+
+
 - `backtest_type4.py` 매수 타이밍 수정: 기간 시작 시 이미 `+` 인 종목은 매수하지 않고, type1과 동일하게 기간 내 `-→+` 전환이 생길 때만 매수하도록 보정
 - 삼성전자(`005930`) 검증: 상시 top 30 종목 기준으로 type1/type4의 사고·파는 횟수가 같아야 함을 확인하고, 수정 후 `15회 매수 / 14회 매도`로 일치함을 확인
 - 문서 정리: `README.md`, `report.md`, session `plan.md`에 type4 규칙과 type4 전용 자금 기준을 최신 동작에 맞게 반영

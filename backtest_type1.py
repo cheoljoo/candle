@@ -36,6 +36,53 @@ from fetch_data import compute_ma10m
 
 SHARES_PER_TRADE = 10
 
+KOSPI_RANK_FILE = DATA_DIR / "kospi_daily_rank.csv"
+SP500_RANK_FILE = DATA_DIR / "sp500_daily_rank.csv"
+
+_rank_cache: dict[str, pd.DataFrame | None] = {}
+
+
+def load_rank_table(group_name: str) -> pd.DataFrame | None:
+    """KOSPI 또는 S&P500 일별 시총순위 테이블 로드 (프로세스 내 캐시 적용)."""
+    if group_name in _rank_cache:
+        return _rank_cache[group_name]
+    if group_name == "KOSPI 200":
+        path = KOSPI_RANK_FILE
+    elif group_name == "S&P500":
+        path = SP500_RANK_FILE
+    else:
+        _rank_cache[group_name] = None
+        return None
+    if not path.exists():
+        _rank_cache[group_name] = None
+        return None
+    df = pd.read_csv(path, index_col=0, parse_dates=True)
+    _rank_cache[group_name] = df
+    return df
+
+
+def get_rank_at_date(
+    rank_table: pd.DataFrame | None,
+    ticker: str,
+    date_str: str,
+) -> str:
+    """
+    특정 티커의 특정 날짜 시총순위 반환 (순위 1 = 시가총액 최대).
+    정확한 날짜가 없으면 직전 가장 가까운 날짜를 사용.
+    데이터 없으면 '-' 반환.
+    """
+    if rank_table is None or not date_str or date_str == "-":
+        return "-"
+    try:
+        ts = pd.Timestamp(date_str)
+        available = rank_table.index[rank_table.index <= ts]
+        if len(available) == 0 or ticker not in rank_table.columns:
+            return "-"
+        val = rank_table.loc[available[-1], ticker]
+        return str(int(val)) if pd.notna(val) else "-"
+    except Exception:
+        return "-"
+
 
 @dataclass(frozen=True)
 class BacktestWindow:
@@ -304,6 +351,7 @@ def build_universe() -> list[tuple[str, list[dict]]]:
 
 def run_group_backtest(group_name: str, items: list[dict], window: BacktestWindow) -> pd.DataFrame:
     rows: list[dict] = []
+    rank_table = load_rank_table(group_name)
 
     for item in items:
         df = load_price_frame(item["stocks_dir"] / f"{item['ticker']}.csv")
@@ -311,6 +359,11 @@ def run_group_backtest(group_name: str, items: list[dict], window: BacktestWindo
             continue
 
         result = simulate_type1(df, window)
+        rank_str = (
+            get_rank_at_date(rank_table, item["ticker"], result["last_buy_date"])
+            if result["shares_held"] > 0 and result["last_buy_date"] != "-"
+            else "-"
+        )
         rows.append(
             {
                 "그룹": group_name,
@@ -334,6 +387,7 @@ def run_group_backtest(group_name: str, items: list[dict], window: BacktestWindo
                 "총손익": result["total_profit"],
                 "수익률(%)": result["return_pct"],
                 "마지막매수일": result["last_buy_date"],
+                "매수일_시총순위": rank_str,
                 "마지막매도일": result["last_sell_date"],
             }
         )
@@ -395,7 +449,7 @@ def print_group_result(group_name: str, window: BacktestWindow, df: pd.DataFrame
     for column in ["평가종가", "총매수금액", "사고판수익", "사고판수익률(%)", "실현손익", "미실현손익", "총손익", "수익률(%)"]:
         display_df[column] = display_df[column].map(format_number)
 
-    right_cols = {"평가종가", "보유주식수", "매수횟수", "매도횟수", "총매수금액", "사고판수익", "사고판수익률(%)", "실현손익", "미실현손익", "총손익", "수익률(%)"}
+    right_cols = {"평가종가", "보유주식수", "매수횟수", "매도횟수", "총매수금액", "사고판수익", "사고판수익률(%)", "실현손익", "미실현손익", "총손익", "수익률(%)", "매수일_시총순위"}
     print_table(display_df, right_cols=right_cols)
 
 

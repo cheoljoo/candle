@@ -1,4 +1,4 @@
-.PHONY: fetch analyze backtest-type1 backtest-type1-2020-2025 backtest-type1-2025-now backtest-type2 backtest-type4 backtest-compare all clean help
+.PHONY: fetch analyze backtest-type1 backtest-type1-2020-2025 backtest-type1-2025-now backtest-type1-2 backtest-type2 backtest-type4 backtest-type4-2 backtest-compare all clean help
 
 help:
 	@echo "사용 가능한 명령:"
@@ -7,8 +7,10 @@ help:
 	@echo "  make backtest-type1 - type1 백테스트 실행 (기본: 올해 01-01 ~ 오늘)"
 	@echo "  make backtest-type1-2020-2025 - type1 백테스트 (2020-01-01 ~ 2025-12-31)"
 	@echo "  make backtest-type1-2025-now  - type1 백테스트 (2025-01-01 ~ 오늘)"
+	@echo "  make backtest-type1-2 - type1-2 백테스트 실행 (현금 추적: 가용 현금으로 최대 주수 매수)"
 	@echo "  make backtest-type2 - type2 백테스트 실행 (기본: plus/minus 연속일수 1)"
 	@echo "  make backtest-type4 - 시가총액 상위 조건 기반 type4 백테스트"
+	@echo "  make backtest-type4-2 - type4-2 백테스트 실행 (시총 조건 + 현금 추적)"
 	@echo "  make backtest-compare - 동일 초기자금 기준 type1/type2/type3 비교"
 	@echo "  make all      - 데이터 수집 후 분석"
 	@echo "  make clean    - 수집된 데이터 삭제"
@@ -34,13 +36,19 @@ backtest-type1-2026-04--now:
 backtest-type2:
 	uv run python -u backtest_type2.py | tee log-backtest-type2.log
 
+backtest-type1-2:
+	uv run python -u backtest_type1_2.py | tee log-backtest-type1-2.log
+
 backtest-type4:
 	uv run python -u backtest_type4.py | tee log-backtest-type4.log
+
+backtest-type4-2:
+	uv run python -u backtest_type4_2.py | tee log-backtest-type4-2.log
 
 backtest-compare:
 	uv run python -u backtest_compare.py | tee log-backtest-compare.log
 
-all: fetch analyze backtest-type1 backtest-type2
+all: fetch analyze backtest-type1 backtest-type2 backtest-type4 backtest-compare
 
 clean:
 	rm -rf data/stocks data/kospi_list.csv

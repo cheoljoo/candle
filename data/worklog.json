@@ -165,5 +165,65 @@
       }
     ],
     "project": "CANDLE"
+  },
+  {
+    "date": "2026-04-13",
+    "start": "13:45",
+    "end": "15:04",
+    "duration": "1h 19m",
+    "tool": "copilot-cli",
+    "session_id": "ce03f93f-77b2-4490-9159-eb0aa68cbc49",
+    "tasks": [
+      {
+        "title": "backtest_type4.py 정리",
+        "detail": "중복 함수 제거 및 매수일_시총순위 컬럼 추가",
+        "start": "13:45",
+        "end": "13:55",
+        "duration": "0h 10m"
+      },
+      {
+        "title": "backtest_compare.py 최고전략 시총순위 추가",
+        "detail": "최고전략_매수일_시총순위 컬럼 추가",
+        "start": "13:55",
+        "end": "14:05",
+        "duration": "0h 10m"
+      },
+      {
+        "title": "backtest_type1_2.py 신규 생성",
+        "detail": "현금 추적 type1 변형 — 첫 매수로 초기자본 설정, 이후 보유현금으로 최대 주수 매수",
+        "start": "14:05",
+        "end": "14:20",
+        "duration": "0h 15m"
+      },
+      {
+        "title": "backtest_type4_2.py 신규 생성",
+        "detail": "type4 시총 조건 + 현금 추적 변형",
+        "start": "14:20",
+        "end": "14:35",
+        "duration": "0h 15m"
+      },
+      {
+        "title": "Makefile 업데이트",
+        "detail": "backtest-type1-2, backtest-type4-2 타겟 추가",
+        "start": "14:35",
+        "end": "14:40",
+        "duration": "0h 5m"
+      },
+      {
+        "title": "backtest_compare.py type1_2/type4_2 추가",
+        "detail": "6개 전략으로 확장, 가변 초기자본 집계 수정",
+        "start": "14:40",
+        "end": "14:55",
+        "duration": "0h 15m"
+      },
+      {
+        "title": "수익률 vs 시가총액 상관관계 분석",
+        "detail": "KOSPI 200 n=200, 피어슨 +0.071, 스피어만 +0.310, Q4 평균 38.5% vs Q1 14.3%",
+        "start": "14:55",
+        "end": "15:04",
+        "duration": "0h 9m"
+      }
+    ],
+    "project": "candle"
   }
 ]

@@ -9,29 +9,37 @@ KOSPI 200 · S&P500 · 주요 ETF 종목의 10월 이동평균 대비 현재가 
 
 ```
 candle/
-├── fetch_data.py       # 일봉 종가 + 거래량 + MA10M 수집 (증분, 당일 재실행 시 스킵)
+├── fetch_data.py       # 일봉 종가 + 거래량 + MA10M + Marcap/Shares 수집, 시총 순위 파일 생성
 ├── analyze.py          # 10월 이평 분석 + 7일 이격률 + 변곡점 출력
-├── backtest_type1.py   # MA10M 돌파/이탈 기반 type1 백테스트
+├── backtest_type1.py   # MA10M 돌파/이탈 기반 type1 백테스트 (고정 10주)
+├── backtest_type1_2.py # type1-2: 가용 현금으로 최대 주수 매수 (현금 추적)
 ├── backtest_type2.py   # 연속 +/- 확인 후 매매하는 type2 백테스트
+├── backtest_type4.py   # 시가총액 상위 조건 기반 type4 백테스트 (고정 10주)
+├── backtest_type4_2.py # type4-2: 시총 조건 + 가용 현금으로 최대 주수 매수
+├── backtest_compare.py # type1/type1_2/type2/type3/type4/type4_2 동일 초기자금 비교
 ├── backtest_reason.py  # type1 결과의 상/하위 수익률 차이 원인 분석
 ├── main.py             # fetch + analyze 통합 초기 버전 (참고용)
 ├── Makefile
 └── data/               # .gitignore 등록 — 커밋하지 않음
     ├── kospi_list.csv
     ├── sp500_list.csv
-    ├── stocks/{code}.csv       # Date, Close, Volume, MA10M
-    └── stocks_us/{symbol}.csv  # Date, Close, Volume, MA10M
+    ├── kospi_daily_rank.csv    # make fetch 시 생성: 날짜×티커 시총순위 (1=최대)
+    ├── sp500_daily_rank.csv    # make fetch 시 생성: 날짜×티커 시총순위
+    ├── stocks/{code}.csv       # Date, Close, Volume, MA10M, Shares, Marcap
+    └── stocks_us/{symbol}.csv  # Date, Close, Volume, MA10M, Shares, Marcap
 ```
 
 ## 사용법
 
 ```bash
-make fetch    # 데이터 수집 (당일 이미 수집 시 스킵, MA10M/Volume 자동 보강)
+make fetch    # 데이터 수집 (당일 이미 수집 시 스킵, MA10M/Volume/Marcap 자동 보강, 시총 순위 파일 생성)
 make analyze  # 분석 실행
-make backtest-type1  # type1 백테스트 실행 (기본: 올해 01-01 ~ 오늘)
-make backtest-type2  # type2 백테스트 실행 (기본: plus/minus 연속일수 1)
-make backtest-type4  # 시가총액 상위 조건 기반 type4 백테스트
-make backtest-compare  # 동일 초기자금 기준 type1/type2/type3/type4 비교
+make backtest-type1      # type1 백테스트 실행 (기본: 올해 01-01 ~ 오늘)
+make backtest-type1-2    # type1-2 백테스트 (현금 추적: 가용 현금으로 최대 주수 매수)
+make backtest-type2      # type2 백테스트 실행 (기본: plus/minus 연속일수 1)
+make backtest-type4      # 시가총액 상위 조건 기반 type4 백테스트
+make backtest-type4-2    # type4-2 백테스트 (시총 조건 + 현금 추적)
+make backtest-compare    # 동일 초기자금 기준 type1/type1_2/type2/type3/type4/type4_2 비교
 make backtest-type1-2020-2025  # 2020-01-01 ~ 2025-12-31 결과 저장
 make backtest-type1-2025-now   # 2025-01-01 ~ 오늘 결과 저장
 make all      # fetch → analyze 순서 실행
@@ -144,7 +152,7 @@ uv run python backtest_reason.py --input_csv backtest_type1.csv --top_n 5
 
 - **KOSPI:** 시가총액 상위 `30`
 - **S&P500:** 시가총액 상위 `100`
-- **매수:** `+` 신호이고, 현재 상위 종목이거나 그 시점의 추정 시가총액 순위가 상위 조건 안이면 매수
+- **매수:** `+` 신호이고, 현재 상위 종목이거나 그 시점의 추정 시가총액 순위가 상위 조건 안이면 **10주 매수**
 - **매도:** `-` 신호가 나오면 매도
 
 시점별 시가총액은 정확한 과거 시총 데이터가 아니라,
@@ -158,14 +166,45 @@ uv run python backtest_type4.py
 uv run python backtest_type4.py --to 2026-04-12 --output_csv data/backtest_type4.csv
 ```
 
-## 동일 초기자금 기준 type1 / type2 / type3 / type4 비교
+## 현금 추적 변형: Type1-2 / Type4-2
 
-`backtest_compare.py` 는 종목마다 동일한 초기자금으로 아래 4가지 전략의 **현재 총자산**을 비교합니다.
+`backtest_type1_2.py` / `backtest_type4_2.py` 는 **가용 현금**을 추적하는 현실적 전략 변형입니다.
 
-- **type1:** `-→+` 전환 시 가용 현금 전액으로 가능한 최대 주수 매수, `+→-` 전환 시 전량 매도
+### 규칙
+
+- **초기 자본 자동 설정**: 첫 번째 매수 시 `SHARES_PER_TRADE × 매수가` 를 초기 자본으로 설정
+  - 이후 매수는 `floor(보유현금 / 매수가)` 주를 최대로 구매
+  - 손해를 본 경우 다음 매수 시 살 수 있는 주수가 줄어듦
+- **매도 시**: 매도 대금은 현금으로 돌아와 다음 매수에 사용됨
+- **주식 1주 단위** 매수
+- type1-2: type1과 동일한 신호 사용
+- type4-2: type4 시가총액 조건 + 현금 추적
+
+### 수익률 계산
+
+`수익률(%) = 총 손익 / 초기 자본 × 100`
+
+(type1/type4의 `총 매수금액` 기준이 아닌 **고정 초기 자본** 기준)
+
+추가 출력 컬럼: `현금잔고`, `초기자본`
+
+```bash
+uv run python backtest_type1_2.py
+uv run python backtest_type1_2.py --to 2026-04-12 --output_csv data/backtest_type1_2.csv
+uv run python backtest_type4_2.py
+uv run python backtest_type4_2.py --to 2026-04-12 --output_csv data/backtest_type4_2.csv
+```
+
+## 동일 초기자금 기준 type1 / type1_2 / type2 / type3 / type4 / type4_2 비교
+
+`backtest_compare.py` 는 종목마다 동일한 초기자금으로 아래 6가지 전략의 **현재 총자산**을 비교합니다.
+
+- **type1:** `-→+` 전환 시 고정 10주 매수, `+→-` 전환 시 전량 매도
+- **type1_2:** type1과 동일 신호이나 가용 현금으로 최대 주수 매수 (현금 추적)
 - **type2:** `plus_days/minus_days` 확인 후 가용 현금 전액 매수 / 전량 매도
 - **type3:** 신호와 무관하게 **3개월마다 동일 금액 적립식 매수 후 계속 보유**
-- **type4:** KOSPI 상위 30 / S&P500 상위 100 시가총액 조건을 만족하는 종목만 `- -> +` 전환에서 매수, `+ -> -` 전환에서 매도
+- **type4:** KOSPI 상위 30 / S&P500 상위 100 시가총액 조건을 만족하는 종목만 `- -> +` 전환에서 10주 매수
+- **type4_2:** type4 시가총액 조건 + 현금 추적 매수
 
 기본값:
 
@@ -174,7 +213,7 @@ uv run python backtest_type4.py --to 2026-04-12 --output_csv data/backtest_type4
 - 초기자금:
   - `KOSPI 200`: `10,000,000 KRW`
   - `S&P500`, `ETF`: `10,000 USD`
-- 단, **type4만 별도 자금 배분**:
+- 단, **type4/type4_2만 별도 자금 배분**:
   - `KOSPI 200`: `10,000,000 / 30`
   - `S&P500`: `10,000 / 100`
   - ETF: 미지원
@@ -187,11 +226,10 @@ uv run python backtest_compare.py --output_csv data/backtest_compare.csv
 
 주요 출력:
 
-- `type1_총자산`, `type2_총자산`, `type3_총자산`
-- `type4_총자산`
-- `type4_초기자금`
-- 각 전략별 `현금`, `보유주식수`, `손익`, `수익률(%)`, `매수횟수`, `매도횟수`
+- 각 전략별 `총자산`, `현금`, `보유주식수`, `손익`, `수익률(%)`, `매수횟수`, `매도횟수`
+- `type1_2_초기자본`, `type4_2_초기자본` (현금 추적 전략의 기준 자본)
 - `최고전략`
+- `최고전략_매수일_시총순위` (최고 전략의 마지막 매수일 당시 시가총액 순위)
 - 평가일 `거래량`, `20일평균거래량`, `거래량배수`
 
 참고:
