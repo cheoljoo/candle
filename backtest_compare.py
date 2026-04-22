@@ -408,25 +408,25 @@ def summary_row(df: pd.DataFrame, group_name: str, initial_capital: float, type4
         row["type4_매수횟수"] = int(df["type4_매수횟수"].sum())
         row["type4_매도횟수"] = int(df["type4_매도횟수"].sum())
         # type4_2: 초기자본이 종목마다 다르므로 합산
-        t42_initial = float(df["type4_2_초기자본"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum()) if "type4_2_초기자본" in df.columns else 0.0
-        t42_profit = float(df["type4_2_손익"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum())
-        row["type4_2_현금잔고"] = round(float(df["type4_2_현금잔고"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum()), 2)
+        t42_initial = float(df["type4_2_초기자본"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum()) if "type4_2_초기자본" in df.columns else 0.0
+        t42_profit = float(df["type4_2_손익"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum())
+        row["type4_2_현금잔고"] = round(float(df["type4_2_현금잔고"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum()), 2)
         row["type4_2_초기자본"] = round(t42_initial, 2)
-        row["type4_2_총자산"] = round(float(df["type4_2_총자산"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum()), 2)
+        row["type4_2_총자산"] = round(float(df["type4_2_총자산"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum()), 2)
         row["type4_2_손익"] = round(t42_profit, 2)
         row["type4_2_수익률(%)"] = round((t42_profit / t42_initial) * 100, 2) if t42_initial else 0.0
-        row["type4_2_매수횟수"] = int(df["type4_2_매수횟수"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum())
-        row["type4_2_매도횟수"] = int(df["type4_2_매도횟수"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum())
+        row["type4_2_매수횟수"] = int(df["type4_2_매수횟수"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum())
+        row["type4_2_매도횟수"] = int(df["type4_2_매도횟수"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum())
     # type1_2: 초기자본이 종목마다 다르므로 합산
-    t12_initial = float(df["type1_2_초기자본"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum())
-    t12_profit = float(df["type1_2_손익"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum())
-    row["type1_2_현금잔고"] = round(float(df["type1_2_현금잔고"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum()), 2)
+    t12_initial = float(df["type1_2_초기자본"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum())
+    t12_profit = float(df["type1_2_손익"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum())
+    row["type1_2_현금잔고"] = round(float(df["type1_2_현금잔고"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum()), 2)
     row["type1_2_초기자본"] = round(t12_initial, 2)
-    row["type1_2_총자산"] = round(float(df["type1_2_총자산"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum()), 2)
+    row["type1_2_총자산"] = round(float(df["type1_2_총자산"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum()), 2)
     row["type1_2_손익"] = round(t12_profit, 2)
     row["type1_2_수익률(%)"] = round((t12_profit / t12_initial) * 100, 2) if t12_initial else 0.0
-    row["type1_2_매수횟수"] = int(df["type1_2_매수횟수"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum())
-    row["type1_2_매도횟수"] = int(df["type1_2_매도횟수"].replace("", 0).apply(pd.to_numeric, args=(None,)).fillna(0).sum())
+    row["type1_2_매수횟수"] = int(df["type1_2_매수횟수"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum())
+    row["type1_2_매도횟수"] = int(df["type1_2_매도횟수"].replace("", 0).apply(pd.to_numeric, args=("coerce",)).fillna(0).sum())
     return row
 
 

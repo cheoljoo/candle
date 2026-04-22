@@ -16,37 +16,42 @@ help:
 	@echo "  make clean    - 수집된 데이터 삭제"
 
 fetch:
-	uv run python -u fetch_data.py | tee log-fetch.log
+	set -o pipefail; uv run python -u fetch_data.py | tee log-fetch.log
 
 analyze:
-	uv run python -u analyze.py | tee log-analyze.log
+	set -o pipefail; uv run python -u analyze.py | tee log-analyze.log
+	uv run python -u gmail_sender.py --subject="[candle] 변곡정 분석" --body-file="./log-analyze.log" --attach-file="./data/inflection_points.csv"
 
 backtest-type1:
-	uv run python -u backtest_type1.py | tee log-backtest-type1.log
+	set -o pipefail; uv run python -u backtest_type1.py | tee log-backtest-type1.log
+	uv run python -u gmail_sender.py --subject="[candle] backtest type1 :  2024.01.01~  규칙: -→+ 10주 매수 / +→- 전량 매도 / 미청산은 --to 기준 평가" --body-file="./log-backtest-type1.log" --attach-file="./backtest_type1.csv"
 
 backtest-type1-2020-2025:
-	uv run python -u backtest_type1.py --from 2020-01-01 --to 2025-12-31 --output_csv data/backtest_type1_2020_2025.csv | tee log-backtest-type1-2020-2025.log
+	set -o pipefail; uv run python -u backtest_type1.py --from 2020-01-01 --to 2025-12-31 --output_csv data/backtest_type1_2020_2025.csv | tee log-backtest-type1-2020-2025.log
 
 backtest-type1-2025-now:
-	uv run python -u backtest_type1.py --from 2025-01-01 --to $$(date +%F) --output_csv data/backtest_type1_2025_now.csv | tee log-backtest-type1-2025-now.log
+	set -o pipefail; uv run python -u backtest_type1.py --from 2025-01-01 --to $$(date +%F) --output_csv data/backtest_type1_2025_now.csv | tee log-backtest-type1-2025-now.log
 
 backtest-type1-2026-04--now:
-	uv run python -u backtest_type1.py --from 2026-04-01 --to $$(date +%F) --output_csv data/backtest_type1_2026_04_now.csv | tee log-backtest-type1-2026-04-now.log
+	set -o pipefail; uv run python -u backtest_type1.py --from 2026-04-01 --to $$(date +%F) --output_csv data/backtest_type1_2026_04_now.csv | tee log-backtest-type1-2026-04-now.log
 
 backtest-type2:
-	uv run python -u backtest_type2.py | tee log-backtest-type2.log
+	set -o pipefail; uv run python -u backtest_type2.py | tee log-backtest-type2.log
+	uv run python -u gmail_sender.py --subject="[candle] backtest type2 :  2024.01.01~  규칙: -→+ 직후 즉시 매수하지 않고 + 1일 연속 확인 후 10주 매수 / +→- 직후 즉시 매도하지 않고 - 1일 연속 확인 후 전량 매도" --body-file="./log-backtest-type2.log" --attach-file="./backtest_type2.csv"
 
 backtest-type1-2:
-	uv run python -u backtest_type1_2.py | tee log-backtest-type1-2.log
+	set -o pipefail; uv run python -u backtest_type1_2.py | tee log-backtest-type1-2.log
 
 backtest-type4:
-	uv run python -u backtest_type4.py | tee log-backtest-type4.log
+	set -o pipefail; uv run python -u backtest_type4.py | tee log-backtest-type4.log
+	uv run python -u gmail_sender.py --subject="[candle] backtest type4 :  2024.01.01~  규칙: KOSPI 상위 30 / S&P500 상위 100 시가총액 조건을 만족하는 + 신호만 매수, - 신호면 매도" --body-file="./log-backtest-type4.log" --attach-file="./backtest_type4.csv"
 
 backtest-type4-2:
-	uv run python -u backtest_type4_2.py | tee log-backtest-type4-2.log
+	set -o pipefail; uv run python -u backtest_type4_2.py | tee log-backtest-type4-2.log
 
 backtest-compare:
-	uv run python -u backtest_compare.py | tee log-backtest-compare.log
+	set -o pipefail; uv run python -u backtest_compare.py | tee log-backtest-compare.log
+	uv run python -u gmail_sender.py --subject="[candle] backtest compare" --body-file="./log-backtest-compare.log" --attach-file="./backtest_compare.csv"
 
 all: fetch analyze backtest-type1 backtest-type2 backtest-type4 backtest-compare
 
