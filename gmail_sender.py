@@ -91,7 +91,7 @@ def main():
 
     sender_email = "cheoljoo@gmail.com"
     sender_password = "dytf xplz hjea dhwj"  # Use app-specific password for Gmail
-    receiver_email = "cheoljoo.lee@lge.com"   # "jihee.yu@gmail.com"
+    receiver_email = "cheoljoo.lee@lge.com,youngho.shin@lge.com,baver.bae@lge.com"   # "jihee.yu@gmail.com"
     cc_email = "cheoljoo@gmail.com"
     subject = args.subject
     body = read_file_content(args.body_file)

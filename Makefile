@@ -1,3 +1,4 @@
+SHELL := /bin/bash
 .PHONY: fetch analyze backtest-type1 backtest-type1-2020-2025 backtest-type1-2025-now backtest-type1-2 backtest-type2 backtest-type4 backtest-type4-2 backtest-compare all clean help
 
 help:
