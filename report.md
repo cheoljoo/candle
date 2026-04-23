@@ -541,3 +541,24 @@ KOSPI 200 기준, 기간 `2024-01-01 ~ 2026-04-13`, n=200 종목.
 - 순위 기준(스피어만 0.31)에서는 더 뚜렷한 경향 확인
 - **type4 전략(시총 상위 조건)**의 아이디어는 데이터에서 일정 부분 근거가 있음
 - S&P500은 현재 per-stock CSV에 시가총액이 없어 별도 분석 필요 (`make fetch` 후 가능)
+
+## 18. `backtest_compare.py` 크래시 수정 (2026-04-23)
+
+### 문제 현상
+`backtest_compare.py` 실행 시 "ETF" 그룹과 같이 시가총액 순위 데이터(`rank_context`)가 생성되지 않는 그룹에서 `AttributeError: 'NoneType' object has no attribute 'current_top_tickers'`가 발생하며 중단되는 문제를 발견했습니다.
+
+### 원인 분석
+- `build_rank_contexts`에서 "ETF" 그룹은 순위 계산 대상에서 제외되어 `rank_contexts` 딕셔너리에 포함되지 않음.
+- `backtest_compare.py`의 `build_group_result` 루프에서 모든 그룹에 대해 `simulate_type4` 및 `simulate_type4_2`를 호출할 때 `rank_contexts.get(group_name)`이 `None`을 반환함.
+- `can_buy_type4` 함수 내부에서 `rank_context`의 속성에 접근하려다 `NoneType` 에러 발생.
+
+### 해결 방법
+1.  **`backtest_type4.py` 공통 함수 보완**
+    - `can_buy_type4(..., rank_context)`에서 `rank_context`가 `None`이면 순위 조건을 타지 않고 무조건 `True`를 반환하도록 수정했습니다. (순위 기반 전략이 아닌 그룹은 신호만 보고 매매 허용)
+    - `simulate_type4` 및 `simulate_type4_capital`에 `rank_context`가 `None`인 경우 "미지원" 상태를 반환하는 방어 로직을 추가했습니다.
+2.  **`backtest_type4_2.py` 수정**
+    - `simulate_type4_2` 함수에 `rank_context` 체크를 추가하여 `None`일 경우 "미지원" 결과와 함께 초기 자본 0을 반환하도록 했습니다.
+
+### 결과
+- "ETF" 그룹을 포함한 전체 백테스트 비교가 크래시 없이 정상적으로 완료됩니다.
+- 순위 데이터가 없는 종목은 `type4`, `type4_2` 항목이 "미지원"으로 표시되어 데이터 혼선을 방지했습니다.

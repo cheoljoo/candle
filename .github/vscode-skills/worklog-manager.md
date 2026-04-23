@@ -1,0 +1,1 @@
+../../.github/skills/worklog-manager/SKILL.md

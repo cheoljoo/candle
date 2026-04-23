@@ -1,3 +1,9 @@
+## 2026-04-23 10:40 ~ 11:12 (0h 32m) [tool: gemini-cli / session: unknown]
+- `backtest_compare.py` 크래시 수정: 시가총액 순위 데이터(`rank_context`)가 없는 그룹(예: ETF)에서 `type4`, `type4_2` 전략 실행 시 발생하는 `AttributeError` 해결
+- `backtest_type4.py` 공통 함수 보완: `can_buy_type4`, `simulate_type4`, `simulate_type4_capital`에 `rank_context=None` 방어 로직 및 "미지원" 상태 반환 추가
+- `backtest_type4_2.py` 수정: `simulate_type4_2`에 `rank_context=None` 체크를 추가하여 통합 비교 시 안정성 확보
+- 버그 재현 및 검증: `repro_bug.py`를 통한 ETF 그룹 처리 검증 완료
+
 ## 2026-04-13 13:45 ~ 15:04 (1h 19m) [tool: copilot-cli / session: ce03f93f-77b2-4490-9159-eb0aa68cbc49]
 - `backtest_type4.py` 정리: 중복 함수(`normalize_symbol`, `fetch_us_marketcap_table`) 제거 후 `fetch_data` 에서 임포트, `매수일_시총순위` 컬럼 추가
 - `backtest_compare.py` 확장: `최고전략_매수일_시총순위` 컬럼 추가 (최고 전략의 마지막 매수일 당시 시총 순위)

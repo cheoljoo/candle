@@ -79,7 +79,7 @@ def simulate_type4_2(
     window: BacktestWindow,
     group_name: str,
     ticker: str,
-    rank_context: RankContext,
+    rank_context: RankContext | None,
 ) -> dict:
     """
     현금 추적 type4 시뮬레이션.
@@ -88,6 +88,13 @@ def simulate_type4_2(
     - 매도: 보유 전량 매도, 현금 회수
     - 시총 순위 조건 만족 시에만 매수
     """
+    if rank_context is None:
+        return {
+            **empty_result(window, float(df["Close"].iloc[-1]), "-", "미지원"),
+            "cash": 0.0,
+            "initial_capital": 0.0,
+        }
+
     start_ts = pd.Timestamp(window.start)
     end_ts = pd.Timestamp(window.end)
     period_df = df.loc[(df.index >= start_ts) & (df.index <= end_ts)].copy()

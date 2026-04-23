@@ -1,0 +1,1 @@
+../../.github/skills/skill-sync-manager/SKILL.md

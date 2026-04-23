@@ -161,7 +161,9 @@ def build_rank_contexts() -> dict[str, RankContext]:
     return contexts
 
 
-def can_buy_type4(group_name: str, ticker: str, trade_date: pd.Timestamp, rank_context: RankContext) -> bool:
+def can_buy_type4(group_name: str, ticker: str, trade_date: pd.Timestamp, rank_context: RankContext | None) -> bool:
+    if rank_context is None:
+        return True
     if ticker in rank_context.current_top_tickers:
         return True
     return ticker in rank_context.historical_top_lookup.get(pd.Timestamp(trade_date), set())
@@ -189,7 +191,10 @@ def empty_result(window: BacktestWindow, current_price: float, price_date: str, 
     }
 
 
-def simulate_type4(df: pd.DataFrame, window: BacktestWindow, group_name: str, ticker: str, rank_context: RankContext) -> dict:
+def simulate_type4(df: pd.DataFrame, window: BacktestWindow, group_name: str, ticker: str, rank_context: RankContext | None) -> dict:
+    if rank_context is None:
+        return empty_result(window, float(df["Close"].iloc[-1]), "-", "미지원")
+
     start_ts = pd.Timestamp(window.start)
     end_ts = pd.Timestamp(window.end)
     period_df = df.loc[(df.index >= start_ts) & (df.index <= end_ts)].copy()
@@ -285,6 +290,7 @@ def simulate_type4_capital(
     ticker: str,
     rank_context: RankContext | None,
 ) -> dict:
+
     if rank_context is None:
         return {
             "shares_held": 0,

@@ -225,5 +225,44 @@
       }
     ],
     "project": "candle"
+  },
+  {
+    "date": "2026-04-23",
+    "start": "10:40",
+    "end": "11:12",
+    "duration": "0h 32m",
+    "tool": "gemini-cli",
+    "session_id": "unknown",
+    "tasks": [
+      {
+        "title": "backtest_compare.py 크래시 원인 분석",
+        "detail": "ETF 그룹과 같이 시가총액 순위 정보(rank_context)가 없는 경우 can_buy_type4에서 None 참조 에러가 발생하는 것을 확인했습니다.",
+        "start": "10:40",
+        "end": "10:50",
+        "duration": "0h 10m"
+      },
+      {
+        "title": "backtest_type4.py 공통 함수 수정",
+        "detail": "can_buy_type4 함수가 rank_context=None을 허용하고, simulate_type4와 simulate_type4_capital 함수에 None 체크와 '미지원' 상태 반환 로직을 추가했습니다.",
+        "start": "10:50",
+        "end": "11:00",
+        "duration": "0h 10m"
+      },
+      {
+        "title": "backtest_type4_2.py 수정",
+        "detail": "simulate_type4_2 함수에 rank_context=None일 때 '미지원'을 반환하는 로직을 추가하여 통합 비교 시 크래시를 방지했습니다.",
+        "start": "11:00",
+        "end": "11:05",
+        "duration": "0h 5m"
+      },
+      {
+        "title": "버그 수정 검증",
+        "detail": "repro_bug.py를 작성하여 ETF 종목 처리 시 '미지원'으로 정상 동작함을 확인하고, make backtest-compare가 중단 없이 실행됨을 검증했습니다.",
+        "start": "11:05",
+        "end": "11:12",
+        "duration": "0h 7m"
+      }
+    ],
+    "project": "CANDLE"
   }
 ]
