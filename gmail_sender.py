@@ -27,8 +27,7 @@ def main():
     def send_email(
         sender_email,
         sender_password,
-        receiver_email,
-        cc_email,
+        bcc_email,
         subject,
         body,
         attachment_path=None,
@@ -48,8 +47,9 @@ def main():
             # Create the email message
             message = MIMEMultipart()
             message["From"] = sender_email
-            message["To"] = receiver_email
-            message["CC"] = cc_email
+            message["To"] = sender_email  # To sender only
+            #message["CC"] = cc_email
+            message["BCC"] = bcc_email
             message["Subject"] = subject
 
             # Add body to email
@@ -91,8 +91,8 @@ def main():
 
     sender_email = "cheoljoo@gmail.com"
     sender_password = "dytf xplz hjea dhwj"  # Use app-specific password for Gmail
-    receiver_email = "cheoljoo.lee@lge.com,youngho.lge@gmail.com,baver.bae@gmail.com"   # "jihee.yu@gmail.com"
-    cc_email = "cheoljoo@gmail.com"
+    bcc_email = "cheoljoo.lee@lge.com,youngho.lge@gmail.com,baver.bae@gmail.com,flyingfunky@gmail.com,firstcall.n@gmail.com"   # "jihee.yu@gmail.com"
+    #cc_email = "cheoljoo@gmail.com"
     subject = args.subject
     body = read_file_content(args.body_file)
 
@@ -103,8 +103,7 @@ def main():
     send_email(
         sender_email,
         sender_password,
-        receiver_email,
-        cc_email,
+        bcc_email,
         subject,
         body,
         attachment_path  # Remove this line if no attachment
