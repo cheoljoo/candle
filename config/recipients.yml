@@ -1,0 +1,20 @@
+# 메일 수신자 설정
+# owner: 항상 발송 대상 (--only-me 시 유일한 수신자)
+# recipients: 각자 개별 To: 로 1인 1메일 발송
+
+owner: cheoljoo@gmail.com
+
+dashboard_url: "http://psncs.iptime.org/stock_candle"
+
+recipients:
+  - email: cheoljoo@gmail.com
+  - email: youngho.lge@gmail.com
+  - email: baver.bae@gmail.com
+  - email: flyingfunky@gmail.com
+  - email: firstcall.n@gmail.com
+  - email: oshopshop@gmail.com
+  - email: jjab@naver.com
+  - email: wingjoy77@gmail.com
+  - email: yoyo2000c@gmail.com
+  - email: juok.kim74@gmail.com
+  - email: greentea7511@gmail.com

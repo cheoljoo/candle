@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕯️</text></svg>">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{{ group_name }} — Candle</title>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -25,6 +26,7 @@
 
 
 {% include "_type_legend.html" %}
+{% include "_download.html" %}
 
 <main class="max-w-7xl mx-auto p-4 space-y-6"
       x-data="{ open_ticker: null }">
@@ -37,8 +39,14 @@
     </p>
     {% set show_rank = group_name in ['KOSPI200', 'SP500'] %}
     {% if period_table %}
+    <div class="flex justify-end mb-2">
+      <button onclick="downloadTableCSV('ret-tbl', '{{ group_name }}_returns.csv')"
+              class="text-xs px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600">
+        ⬇ CSV 다운로드
+      </button>
+    </div>
     <div class="overflow-x-auto">
-      <table class="min-w-full text-sm border-collapse">
+      <table id="ret-tbl" class="min-w-full text-sm border-collapse">
         <thead class="bg-slate-100 text-slate-600 text-xs">
           <tr>
             <th class="text-left px-3 py-2 sticky left-0 bg-slate-100">종목</th>

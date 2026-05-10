@@ -183,7 +183,11 @@ def dashboard(
 
 @app.command("optimize-streak")
 def optimize_streak(
-    market:     str = typer.Option("all",  help="kr | us | all"),
+    market:     str  = typer.Option("all",  help="kr | us | all"),
+    all_groups: bool = typer.Option(False, "--all-groups",
+                                    help="전체 + 4개 그룹별 결과를 한번에 생성 (--output-dir 디렉터리에 저장)"),
+    output_dir: Optional[str] = typer.Option(None, "--output-dir",
+                                              help="--all-groups 시 저장 디렉터리 (기본 output/optimize/)"),
     start:      Optional[str] = typer.Option(None, "--from",       help="시작일 YYYY-MM-DD"),
     end:        Optional[str] = typer.Option(None, "--to",         help="종료일 YYYY-MM-DD"),
     plus_min:   int = typer.Option(4,  "--plus-min",  help="plus_days 최솟값 (기본 4)"),
@@ -194,35 +198,32 @@ def optimize_streak(
     minus_step: int = typer.Option(2,  "--minus-step",help="minus_days 간격 (기본 2)"),
     workers:    int = typer.Option(4,  "--workers",   help="ticker 로딩 병렬 worker 수 (기본 4)"),
     top_n:      int = typer.Option(30, "--top",       help="상위 N개 출력 (기본 30)"),
-    output:     Optional[str] = typer.Option(None, "--output", help="전체 결과 저장 CSV 경로"),
+    output:     Optional[str] = typer.Option(None, "--output", help="단일 결과 저장 CSV 경로 (--all-groups 미사용 시)"),
 ):
-    """plus_days / minus_days 그리드 서치 — type2_2 계열 최적 연속일수 탐색.
+    """plus_days / minus_days 그리드 서치 — type2_1b / type2_2b 최적 연속일수 탐색.
 
-    모든 (plus_days, minus_days) 조합에 대해 전체 종목 backtest 를 수행하고
-    avg_return 이 가장 높은 파라미터 조합을 찾습니다.
-    (type2_2 전략: N일 연속 상승 → 전액 매수 / M일 연속 하락 → 전량 매도)
+    type2 전략 (연속일수 신호)의 plus_days / minus_days 를 바꿔가며
+    718개 전 종목에 대한 시뮬레이션을 수행, avg_return 이 가장 높은 조합을 찾습니다.
 
-    기본값: plus 4~40 step 2, minus 4~10 step 2 → 19×4=76 조합
+    --all-groups: 전체(all) + KOSPI200 / SP500 / ETF_KR / ETF_US 5개 결과 파일 생성
     """
     cfg = config.load()
-    from .optimize.streak_grid import run as sg_run
+    from .optimize.streak_grid import run as sg_run, run_all_groups
     from pathlib import Path as _Path
-    out_path = _Path(output) if output else None
-    sg_run(
-        cfg,
-        market=market,
-        start=_maybe_date(start),
-        end=_maybe_date(end),
-        plus_min=plus_min,
-        plus_max=plus_max,
-        plus_step=plus_step,
-        minus_min=minus_min,
-        minus_max=minus_max,
-        minus_step=minus_step,
-        workers=workers,
-        top_n=top_n,
-        output_csv=out_path,
+
+    kwargs = dict(
+        start=_maybe_date(start), end=_maybe_date(end),
+        plus_min=plus_min, plus_max=plus_max, plus_step=plus_step,
+        minus_min=minus_min, minus_max=minus_max, minus_step=minus_step,
+        workers=workers, top_n=top_n,
     )
+
+    if all_groups:
+        out_d = _Path(output_dir) if output_dir else cfg.output_dir / "optimize"
+        run_all_groups(cfg, output_dir=out_d, **kwargs)
+    else:
+        out_path = _Path(output) if output else None
+        sg_run(cfg, market=market, output_csv=out_path, **kwargs)
 
 
 def main():

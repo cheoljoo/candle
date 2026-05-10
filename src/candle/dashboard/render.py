@@ -170,6 +170,19 @@ def render(cfg: config.Config, on_date: date,
     (out_dir / "docs.html").write_text(docs_tpl.render(**docs_ctx), encoding="utf-8")
     tprint(f"[dashboard] docs.html 완료 — {len(docs)}개 문서 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
+    # optimize.html
+    tprint("[dashboard] optimize.html 렌더...", flush=True)
+    t0 = time.perf_counter()
+    opt_data = _load_optimize_results(cfg)
+    opt_tpl = env.get_template("optimize.html")
+    opt_ctx = dict(common_ctx)
+    opt_ctx["opt_data"] = opt_data
+    opt_ctx["opt_groups"] = _OPT_GROUPS
+    opt_ctx["opt_labels"] = _OPT_LABELS
+    (out_dir / "optimize.html").write_text(opt_tpl.render(**opt_ctx), encoding="utf-8")
+    n_all = len(opt_data.get("all", []))
+    tprint(f"[dashboard] optimize.html 완료 — 전체 {n_all}개 조합 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
     # 사이드 JSON
     tprint("[dashboard] JSON 산출물 저장...", flush=True)
     t0 = time.perf_counter()
@@ -188,11 +201,11 @@ def render(cfg: config.Config, on_date: date,
     tprint(f"[dashboard] JSON 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     total_elapsed = time.perf_counter() - _t_total
-    tprint(f"[dashboard] 완료 — 8개 파일, 전체 {total_elapsed:.1f}s", flush=True)
+    tprint(f"[dashboard] 완료 — 9개 파일, 전체 {total_elapsed:.1f}s", flush=True)
 
     return {
         "out": str(out_dir / "index.html"),
-        "pages": 8,
+        "pages": 9,
         "decisions": len(decisions),
         "compare_periods": len(compare_period_list),
         "inflections": len(inflections),
@@ -473,27 +486,31 @@ def _build_period_table(cfg: config.Config) -> tuple[list[dict], list[str]]:
 
 
 _DOC_LABELS: dict[str, str] = {
-    "claude-opus-4-7_guide":  "아키텍처 가이드",
-    "claude-work":            "작업 이력",
-    "req":                    "요구사항",
     "README":                 "README",
+    "claude-opus-4-7_guide":  "아키텍처 가이드",
+    "req":                    "요구사항",
+    "claude-work":            "작업 이력",
+    "msg":                    "메시지/노트",
     "gemini_analysis_report": "Gemini 분석",
 }
 
-# 원하는 표시 순서 (목록에 없으면 알파벳 뒤에 붙음)
+# 원하는 표시 순서 (목록에 없으면 알파벳 순으로 자동 추가 — 새 *.md 파일은 자동 반영)
 _DOC_ORDER: list[str] = [
     "README",
     "claude-opus-4-7_guide",
     "req",
     "claude-work",
+    "msg",
     "gemini_analysis_report",
 ]
 
 
 def _load_docs(cfg: config.Config) -> list[dict]:
-    """claude/ 디렉터리의 .md 파일을 읽어 [{label, filename, content}, ...] 반환.
+    """claude/ 디렉터리의 *.md 파일을 모두 읽어 [{label, filename, content}, ...] 반환.
 
-    _DOC_ORDER 에 정의된 순서로 정렬하고, 나머지는 알파벳 뒤에 추가.
+    - _DOC_ORDER 에 정의된 파일은 그 순서대로 표시.
+    - 목록에 없는 새 *.md 파일은 알파벳 순으로 자동 추가됨 (별도 코드 수정 불필요).
+    - _DOC_LABELS 에 없는 파일은 파일명(stem)이 그대로 레이블로 사용됨.
     """
     docs_dir = cfg.repo_root / "claude"
     if not docs_dir.exists():
@@ -515,6 +532,57 @@ def _load_docs(cfg: config.Config) -> list[dict]:
     for stem in sorted(raw):
         ordered.append(raw[stem])
     return ordered
+
+
+_OPT_GROUPS = ["all", "KOSPI200", "SP500", "ETF_KR", "ETF_US"]
+_OPT_LABELS = {
+    "all":     "전체 (718종목)",
+    "KOSPI200":"KOSPI200",
+    "SP500":   "S&P500",
+    "ETF_KR":  "ETF_KR",
+    "ETF_US":  "ETF_US",
+}
+
+
+def _load_optimize_results(cfg: config.Config) -> dict[str, list[dict]]:
+    """output/optimize/streak_grid_{group}.csv 읽어 {group: [rows]} 반환.
+
+    파일이 없는 그룹은 빈 리스트. 기존 streak_grid.csv(단일파일)도 'all'로 fallback.
+    """
+    opt_dir = cfg.output_dir / "optimize"
+    # 메타데이터 로드 (없으면 빈 dict)
+    meta_path = opt_dir / "streak_grid_meta.json"
+    meta: dict = {}
+    if meta_path.exists():
+        try:
+            import json as _json
+            meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    result: dict[str, list[dict]] = {"_meta": [meta] if meta else []}
+
+    for g in _OPT_GROUPS:
+        p = opt_dir / f"streak_grid_{g}.csv"
+        if not p.exists() and g == "all":
+            p = opt_dir / "streak_grid.csv"  # 기존 단일 파일 fallback
+        if not p.exists():
+            result[g] = []
+            continue
+        try:
+            df = pd.read_csv(p)
+        except Exception as e:
+            log.warning(f"{p.name} 읽기 실패: {e}")
+            result[g] = []
+            continue
+        for col in ["avg_return", "median_return", "hit_rate"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        for col in ["plus_days", "minus_days", "n_positive", "n_total"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+        result[g] = df.fillna("").to_dict(orient="records")
+    return result
 
 
 def _json_default(o):

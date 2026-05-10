@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕯️</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>파라미터 최적화 — Candle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+    [x-cloak] { display: none !important; }
+  </style>
+
+  {# ── 데이터 및 Alpine 컴포넌트 — head에서 미리 정의 ── #}
+  <script>
+  var OPT_DATA   = {{ opt_data   | tojson }};
+  var OPT_GROUPS = {{ opt_groups | tojson }};
+  var OPT_LABELS = {{ opt_labels | tojson }};
+
+  var OPT_META = (OPT_DATA['_meta'] && OPT_DATA['_meta'][0]) ? OPT_DATA['_meta'][0] : {};
+
+  function optApp() {
+    return {
+      allData:   OPT_DATA,
+      groups:    OPT_GROUPS,
+      labels:    OPT_LABELS,
+      meta:      OPT_META,
+      curGroup:  'all',
+      sortCol:   'avg_return',
+      sortDir:   -1,
+      plusVals:  [4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40],
+      minusVals: [4,6,8,10],
+
+      init: function() { this.curGroup = 'all'; },
+
+      curRows: function() {
+        return this.allData[this.curGroup] || [];
+      },
+
+      sortedRows: function() {
+        var rows = this.curRows();
+        var col  = this.sortCol;
+        var dir  = this.sortDir;
+        return rows.slice().sort(function(a, b) {
+          var va = (a[col] !== '' && a[col] != null) ? +a[col] : -Infinity;
+          var vb = (b[col] !== '' && b[col] != null) ? +b[col] : -Infinity;
+          return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+        });
+      },
+
+      retMap: function() {
+        var m = {};
+        var rows = this.curRows();
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          m[r.plus_days + '_' + r.minus_days] = +r.avg_return;
+        }
+        return m;
+      },
+
+      maxRet: function() {
+        var rows = this.curRows();
+        if (!rows.length) return 1;
+        var max = -Infinity;
+        for (var i = 0; i < rows.length; i++) {
+          var v = +rows[i].avg_return;
+          if (v > max) max = v;
+        }
+        return max || 1;
+      },
+
+      selectGroup: function(g) {
+        this.curGroup = g;
+        this.sortCol  = 'avg_return';
+        this.sortDir  = -1;
+      },
+
+      setSort: function(col) {
+        if (this.sortCol === col) { this.sortDir *= -1; }
+        else { this.sortCol = col; this.sortDir = -1; }
+      },
+
+      arrow: function(col) {
+        if (this.sortCol !== col) return '⇕';
+        return this.sortDir === -1 ? '↓' : '↑';
+      },
+
+      heatVal: function(p, m) {
+        var v = this.retMap()[p + '_' + m];
+        return (v != null) ? Math.round(v) + '%' : '-';
+      },
+
+      heatTitle: function(p, m) {
+        var v = this.retMap()[p + '_' + m];
+        return (v != null) ? 'plus=' + p + ' minus=' + m + ' avg=' + v.toFixed(1) + '%' : '';
+      },
+
+      heatClass: function(p, m) {
+        var v = this.retMap()[p + '_' + m];
+        if (v == null) return 'bg-slate-100 text-slate-400';
+        var pct = this.maxRet() > 0 ? v / this.maxRet() * 100 : 0;
+        if (pct >= 90) return 'bg-emerald-600 text-white font-semibold';
+        if (pct >= 78) return 'bg-emerald-500 text-white';
+        if (pct >= 65) return 'bg-emerald-400 text-white';
+        if (pct >= 52) return 'bg-emerald-300 text-slate-800';
+        if (pct >= 40) return 'bg-emerald-200 text-slate-800';
+        if (pct >= 28) return 'bg-emerald-100 text-slate-700';
+        return 'bg-slate-100 text-slate-600';
+      }
+    };
+  }
+  </script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="border-b bg-white">
+  <div class="max-w-7xl mx-auto px-4 py-4">
+    <h1 class="text-xl font-semibold">Candle Dashboard — type2 파라미터 최적화</h1>
+    <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+  </div>
+</header>
+
+{% include "_nav.html" %}
+{% include "_download.html" %}
+
+<main class="max-w-7xl mx-auto p-4 space-y-5" x-data="optApp()" x-init="init()" x-cloak>
+
+  {# ── 전략 설명 + 시험 구간 ───────────────────────────────────────────── #}
+  <section class="bg-white rounded-lg shadow-sm p-5">
+    <h2 class="text-base font-semibold mb-3">📖 이 최적화는 무엇인가?</h2>
+    <div class="text-sm text-slate-700 space-y-2 leading-relaxed">
+      <p>
+        <strong>type2_1b / type2_2b 전략</strong>은
+        MA10M_UPDOWN(10월 이동평균 대비 현재가 방향)이
+        <code class="bg-emerald-50 text-emerald-700 px-1 rounded">plus_days</code>일 연속
+        <strong class="text-emerald-700">+</strong>가 되면 <strong class="text-emerald-700">매수</strong>,
+        <code class="bg-rose-50 text-rose-700 px-1 rounded">minus_days</code>일 연속
+        <strong class="text-rose-700">-</strong>가 되면 <strong class="text-rose-700">매도</strong>하는 추세추종 전략입니다.
+      </p>
+      <p>
+        <code class="bg-slate-100 px-1 rounded">plus_days ∈ {4,6,…,40}</code> ×
+        <code class="bg-slate-100 px-1 rounded">minus_days ∈ {4,6,8,10}</code> = <strong>76가지 조합</strong>을
+        KOSPI200·S&P500·ETF 전 종목에 대해 시뮬레이션하여 최적 파라미터를 찾습니다.
+      </p>
+      <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800">
+        <strong>최적 파라미터 적용</strong>:
+        <code class="bg-amber-100 px-1 rounded">config/strategies.yml</code>의
+        <code class="bg-amber-100 px-1 rounded">type2_1b</code> /
+        <code class="bg-amber-100 px-1 rounded">type2_2b</code> 의
+        <code class="bg-amber-100 px-1 rounded">plus_days</code> /
+        <code class="bg-amber-100 px-1 rounded">minus_days</code> 수정 후
+        <code class="bg-amber-100 px-1 rounded">make v2-backtest</code> 재실행.
+      </div>
+    </div>
+
+    {# 시험 구간 정보 #}
+    <div class="mt-4 border-t pt-4">
+      <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">마지막 최적화 실행 정보</h3>
+      <div x-show="meta.run_date" class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-400 mb-0.5">실행일시</div>
+          <div class="font-semibold text-slate-700" x-text="meta.run_date || '-'"></div>
+        </div>
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-400 mb-0.5">데이터 시작일</div>
+          <div class="font-semibold text-slate-700" x-text="meta.data_from || '-'"></div>
+        </div>
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-400 mb-0.5">데이터 종료일</div>
+          <div class="font-semibold text-slate-700" x-text="meta.data_to || '-'"></div>
+        </div>
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-400 mb-0.5">유효 종목 수</div>
+          <div class="font-semibold text-slate-700" x-text="(meta.n_tickers_total || '-') + '개'"></div>
+        </div>
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-400 mb-0.5">plus_days 범위</div>
+          <div class="font-semibold text-emerald-700" x-text="meta.plus_range || '-'"></div>
+        </div>
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-400 mb-0.5">minus_days 범위</div>
+          <div class="font-semibold text-rose-700" x-text="meta.minus_range || '-'"></div>
+        </div>
+        <div class="bg-slate-50 rounded p-2">
+          <div class="text-slate-400 mb-0.5">조합 수</div>
+          <div class="font-semibold text-slate-700" x-text="(meta.n_combos || '-') + '가지'"></div>
+        </div>
+      </div>
+      <div x-show="!meta.run_date" class="text-xs text-slate-400">
+        메타 정보 없음 — <code>make v2-optimize</code> 실행 후 대시보드를 재생성하면 표시됩니다.
+      </div>
+    </div>
+  </section>
+
+  {# ── 컬럼 설명 ───────────────────────────────────────────────────────── #}
+  <section class="bg-white rounded-lg shadow-sm p-5">
+    <details class="group">
+      <summary class="cursor-pointer text-base font-semibold flex items-center gap-2 select-none list-none">
+        <span class="group-open:hidden">▶</span><span class="hidden group-open:inline">▼</span>
+        📊 컬럼 설명 (클릭해서 펼치기)
+      </summary>
+      <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+        <div class="flex gap-3 p-3 rounded-lg bg-emerald-50 border border-emerald-100">
+          <div class="font-mono font-bold text-emerald-700 w-32 shrink-0">plus_days</div>
+          <div><span class="font-semibold">매수 연속일수</span> — MA10M_UPDOWN 이 <strong class="text-emerald-700">+</strong> 방향으로 이 일수 연속 시 매수. 작을수록 빠른 진입.</div>
+        </div>
+        <div class="flex gap-3 p-3 rounded-lg bg-rose-50 border border-rose-100">
+          <div class="font-mono font-bold text-rose-700 w-32 shrink-0">minus_days</div>
+          <div><span class="font-semibold">매도 연속일수</span> — MA10M_UPDOWN 이 <strong class="text-rose-700">-</strong> 방향으로 이 일수 연속 시 매도. 작을수록 빠른 손절.</div>
+        </div>
+        <div class="flex gap-3 p-3 rounded-lg bg-blue-50 border border-blue-100">
+          <div class="font-mono font-bold text-blue-700 w-32 shrink-0">avg_return</div>
+          <div><span class="font-semibold">평균 수익률 (%)</span> — 전 종목 수익률의 산술 평균. 소수 대형 종목 영향을 받을 수 있음.</div>
+        </div>
+        <div class="flex gap-3 p-3 rounded-lg bg-violet-50 border border-violet-100">
+          <div class="font-mono font-bold text-violet-700 w-32 shrink-0">median_return</div>
+          <div><span class="font-semibold">중앙값 수익률 (%)</span> — 극단값 영향 없는 "일반 종목의 성과". avg_return과 함께 확인.</div>
+        </div>
+        <div class="flex gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
+          <div class="font-mono font-bold text-slate-700 w-32 shrink-0">n_positive</div>
+          <div><span class="font-semibold">수익 종목 수</span> — 수익률 &gt; 0 인 종목 수 / 전체(n_total).</div>
+        </div>
+        <div class="flex gap-3 p-3 rounded-lg bg-amber-50 border border-amber-100">
+          <div class="font-mono font-bold text-amber-700 w-32 shrink-0">hit_rate</div>
+          <div><span class="font-semibold">승률 (%)</span> — n_positive / n_total × 100. 80% 이상이면 안정적인 조합.</div>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  {# ── 그룹 탭 + 히트맵 + 테이블 ──────────────────────────────────────── #}
+  <section class="bg-white rounded-lg shadow-sm p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-base font-semibold">📈 그룹별 최적화 결과</h2>
+      <span class="text-xs text-slate-400">그룹 없으면 <code>make v2-optimize</code> 재실행</span>
+    </div>
+
+    {# 탭 #}
+    <div class="border-b mb-4 flex gap-1 flex-wrap text-sm">
+      <template x-for="g in groups" :key="g">
+        <button @click="selectGroup(g)"
+                :class="curGroup === g ? 'border-b-2 border-slate-800 font-semibold text-slate-800' : 'text-slate-500 hover:text-slate-700'"
+                class="px-4 py-2 whitespace-nowrap transition-colors"
+                x-text="labels[g] || g"></button>
+      </template>
+    </div>
+
+    {# 데이터 없음 #}
+    <div x-show="curRows().length === 0" class="text-sm text-slate-500 py-6 text-center">
+      <p>이 그룹의 최적화 결과가 없습니다.</p>
+      <p class="mt-1 text-xs text-slate-400"><code class="bg-slate-100 px-2 py-1 rounded">make v2-optimize</code> 실행 후 대시보드를 재생성하세요.</p>
+    </div>
+
+    <div x-show="curRows().length > 0">
+      {# 히트맵 #}
+      <h3 class="text-sm font-semibold text-slate-600 mb-2">히트맵 — avg_return (매수 연속일수 × 매도 연속일수)</h3>
+      <p class="text-xs text-slate-400 mb-3">짙은 초록 = 높은 수익률 · 마우스 오버로 정확한 값 확인</p>
+      <div class="overflow-x-auto mb-6">
+        <table class="text-xs border-collapse">
+          <thead>
+            <tr>
+              <th class="px-2 py-1 text-right text-slate-400 font-normal text-xs">매수↓ / 매도→</th>
+              <template x-for="m in minusVals" :key="m">
+                <th class="px-3 py-1 text-center font-mono font-semibold text-rose-700"
+                    x-text="m + '일'"></th>
+              </template>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="p in plusVals" :key="p">
+              <tr>
+                <td class="px-2 py-1 text-right font-mono font-semibold text-emerald-700"
+                    x-text="p + '일'"></td>
+                <template x-for="m in minusVals" :key="m">
+                  <td class="px-2 py-1 text-center tabular-nums rounded cursor-default"
+                      :class="heatClass(p, m)"
+                      :title="heatTitle(p, m)"
+                      x-text="heatVal(p, m)"></td>
+                </template>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      {# 결과 테이블 #}
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm font-semibold text-slate-600">전체 조합 결과</h3>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-slate-400" x-text="curRows().length + '개 조합'"></span>
+          <button @click="downloadTableCSV('opt-tbl-' + curGroup, 'optimize_' + curGroup + '.csv')"
+                  class="text-xs px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600">
+            ⬇ CSV 다운로드
+          </button>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mb-2">헤더 클릭 → 정렬 · <span class="text-emerald-600 font-semibold">상위 3위</span> 초록 강조</p>
+      <div class="overflow-x-auto">
+        <table :id="'opt-tbl-' + curGroup" class="min-w-full text-sm border-collapse">
+          <thead class="bg-slate-100 text-slate-600 text-xs select-none">
+            <tr>
+              <th class="px-3 py-2 text-center">#</th>
+              <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200" @click="setSort('plus_days')">
+                매수 연속일수<br><span class="text-emerald-600 font-mono">plus_days</span>
+                <span x-text="arrow('plus_days')"></span></th>
+              <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200" @click="setSort('minus_days')">
+                매도 연속일수<br><span class="text-rose-600 font-mono">minus_days</span>
+                <span x-text="arrow('minus_days')"></span></th>
+              <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200" @click="setSort('avg_return')">
+                평균 수익률<br><span class="text-blue-600 font-mono">avg_return</span>
+                <span x-text="arrow('avg_return')"></span></th>
+              <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200" @click="setSort('median_return')">
+                중앙값 수익률<br><span class="text-violet-600 font-mono">median_return</span>
+                <span x-text="arrow('median_return')"></span></th>
+              <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200" @click="setSort('n_positive')">
+                수익 종목수<br><span class="text-slate-500 font-mono">n_positive</span>
+                <span x-text="arrow('n_positive')"></span></th>
+              <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200" @click="setSort('hit_rate')">
+                승률<br><span class="text-amber-600 font-mono">hit_rate</span>
+                <span x-text="arrow('hit_rate')"></span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(r, idx) in sortedRows()" :key="idx">
+              <tr class="border-t" :class="idx < 3 ? 'bg-emerald-50' : 'hover:bg-slate-50'">
+                <td class="px-3 py-2 text-center text-xs"
+                    :class="idx === 0 ? 'font-bold text-emerald-700' : 'text-slate-400'"
+                    x-text="idx === 0 ? '🏆 1' : (idx + 1)"></td>
+                <td class="px-3 py-2 text-right font-mono font-semibold text-emerald-700"
+                    x-text="r.plus_days + '일'"></td>
+                <td class="px-3 py-2 text-right font-mono font-semibold text-rose-700"
+                    x-text="r.minus_days + '일'"></td>
+                <td class="px-3 py-2 text-right tabular-nums font-bold"
+                    :class="+r.avg_return >= 1000 ? 'text-emerald-700' : +r.avg_return >= 500 ? 'text-emerald-600' : 'text-slate-700'"
+                    x-text="(+r.avg_return).toLocaleString('ko-KR',{maximumFractionDigits:1}) + '%'"></td>
+                <td class="px-3 py-2 text-right tabular-nums text-violet-700"
+                    x-text="(+r.median_return).toLocaleString('ko-KR',{maximumFractionDigits:1}) + '%'"></td>
+                <td class="px-3 py-2 text-right tabular-nums"
+                    x-text="r.n_positive + ' / ' + r.n_total"></td>
+                <td class="px-3 py-2 text-right tabular-nums"
+                    :class="+r.hit_rate >= 84 ? 'text-emerald-600 font-semibold' : 'text-slate-700'"
+                    x-text="(+r.hit_rate).toFixed(1) + '%'"></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }} ·
+    <code>make v2-optimize</code> 로 재실행</p>
+</main>
+
+</body>
+</html>

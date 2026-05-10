@@ -1,9 +1,11 @@
 SHELL := /bin/bash
 
-# ── DEBUG 플래그 ───────────────────────────────────────────────────────────
-# 기본값: 비어 있음 (debug 없음)
-# debug 켜기: make <target> DEBUG=--debug
-DEBUG ?=
+# ── 플래그 ────────────────────────────────────────────────────────────────────
+# debug 켜기:    make <target> DEBUG=--debug
+# 메일 발송 켜기: make <target> SENDMAIL=YES
+DEBUG    ?=
+SENDMAIL ?= YES
+
 
 .PHONY: fetch analyze backtest-type1 backtest-type1-2020-2025 backtest-type1-2025-now \
         backtest-type1-2 backtest-type2 backtest-type4 backtest-type4-2 backtest-compare \
@@ -17,50 +19,59 @@ DEBUG ?=
         v2-backtest-compare-2010-2020 v2-backtest-compare-2000-2015 \
         v2-simulate v2-simulate-noai \
         v2-dashboard \
+        v2-mail v2-mail-me \
         v2-optimize \
         v2-smoke v2-all
 
-# ── 구형 v1 타겟 ───────────────────────────────────────────────────────────
+# ── 도움말 ────────────────────────────────────────────────────────────────────
 help:
 	@echo "=== Candle v2 — 추세추종 자동 투자 시스템 ==="
 	@echo ""
 	@echo "전체 파이프라인:"
-	@echo "  make v2-all                       - universe→fetch(full)→analyze→backtest→simulate→dashboard"
-	@echo "  make v2-all DEBUG=--debug         - 위 + 단계별 상세 출력"
+	@echo "  make v2-all                         - universe→fetch(full)→analyze→backtest→simulate→dashboard"
+	@echo "  make v2-all SENDMAIL=YES            - 위 + 완료 후 전체 수신자에게 메일 발송"
+	@echo "  make v2-all DEBUG=--debug           - 위 + 단계별 상세 출력"
+	@echo "  make v2-all DEBUG=--debug SENDMAIL=YES - 디버그 + 메일 발송"
 	@echo ""
 	@echo "단계별 실행:"
-	@echo "  make v2-universe                  - 종목 목록 갱신 (KOSPI200/SP500/ETF)"
-	@echo "  make v2-fetch                     - 오늘치 증분 fetch"
-	@echo "  make v2-fetch-full                - 2000-01-01부터 전체 fetch"
-	@echo "  make v2-analyze                   - 증분 분석 (새 row 자동 감지)"
-	@echo "  make v2-analyze-refresh           - 전체 재분석 (백필 후 1회 실행)"
-	@echo "  make v2-backtest                  - 기간별 backtest+compare 병렬 실행"
-	@echo "  make v2-simulate                  - 오늘 의사결정 (rule+AI+manual)"
-	@echo "  make v2-simulate-noai             - AI 없이 rule+manual만"
-	@echo "  make v2-dashboard                 - HTML 대시보드 재생성"
+	@echo "  make v2-universe                    - 종목 목록 갱신 (KOSPI200/SP500/ETF)"
+	@echo "  make v2-fetch                       - 오늘치 증분 fetch"
+	@echo "  make v2-fetch-full                  - 2000-01-01부터 전체 fetch"
+	@echo "  make v2-analyze                     - 증분 분석 (새 row 자동 감지)"
+	@echo "  make v2-analyze-refresh             - 전체 재분석 (백필 후 1회 실행)"
+	@echo "  make v2-backtest                    - 기간별 backtest+compare 병렬 실행"
+	@echo "  make v2-simulate                    - 오늘 의사결정 (rule+AI+manual)"
+	@echo "  make v2-simulate-noai               - AI 없이 rule+manual만"
+	@echo "  make v2-dashboard                   - HTML 대시보드 재생성"
 	@echo ""
 	@echo "Backtest 기간별 타겟:"
-	@echo "  make v2-backtest-compare-full     - 2000-01-01~ backtest+compare"
-	@echo "  make v2-backtest-compare-5y       - 최근 5년 backtest+compare"
-	@echo "  make v2-backtest-compare-2010-2020 - 2010~2020 고정 기간"
-	@echo "  make v2-backtest-compare-2000-2015 - 2000~2015 고정 기간"
+	@echo "  make v2-backtest-compare-full       - 2000-01-01~ backtest+compare"
+	@echo "  make v2-backtest-compare-5y         - 최근 5년 backtest+compare"
+	@echo "  make v2-backtest-compare-2010-2020  - 2010~2020 고정 기간"
+	@echo "  make v2-backtest-compare-2000-2015  - 2000~2015 고정 기간"
+	@echo ""
+	@echo "메일 발송 (config/recipients.yml 기반 개별 To:):"
+	@echo "  make v2-mail                        - 전체 수신자 발송 (decisions.json 자동 본문)"
+	@echo "  make v2-mail-me                     - owner 에게만 테스트 발송"
 	@echo ""
 	@echo "파라미터 최적화 (v2-all 미포함 — 수동 실행):"
-	@echo "  make v2-optimize                  - plus 4~40 step2 × minus 4~10 step2 = 76조합"
-	@echo "  make v2-optimize DEBUG=--debug    - 위 + 상세 출력"
+	@echo "  make v2-optimize                    - plus 4~40 step2 × minus 4~10 step2 = 76조합"
 	@echo ""
 	@echo "기타:"
-	@echo "  make v2-smoke                     - 소규모 universe로 전체 파이프라인 검증"
-	@echo "  make v2-universe-small            - dev용 소규모 universe 빌드"
+	@echo "  make v2-smoke                       - 소규모 universe로 전체 파이프라인 검증"
+	@echo "  make v2-universe-small              - dev용 소규모 universe 빌드"
 	@echo ""
-	@echo "옵션: DEBUG=--debug  (예: make v2-fetch DEBUG=--debug)"
+	@echo "옵션:"
+	@echo "  DEBUG=--debug    단계별 상세 출력  (예: make v2-fetch DEBUG=--debug)"
+	@echo "  SENDMAIL=YES     완료 후 메일 발송 (예: make v2-all SENDMAIL=YES)"
 
+# ── 구형 v1 타겟 (하위 호환) ──────────────────────────────────────────────────
 fetch:
 	set -o pipefail; uv run python -u fetch_data.py | tee log-fetch.log
 
 analyze:
 	set -o pipefail; uv run python -u analyze.py | tee log-analyze.log
-	uv run python -u gmail_sender.py --subject="[candle] 변곡정 분석" --body-file="./log-analyze.log" --attach-file="./data/inflection_points.csv"
+	uv run python -u gmail_sender.py --subject="[candle] 변곡점 분석" --body-file="./log-analyze.log" --attach-file="./data/inflection_points.csv"
 
 backtest-type1:
 	set -o pipefail; uv run python -u backtest_type1.py | tee log-backtest-type1.log
@@ -77,14 +88,14 @@ backtest-type1-2026-04--now:
 
 backtest-type2:
 	set -o pipefail; uv run python -u backtest_type2.py | tee log-backtest-type2.log
-	uv run python -u gmail_sender.py --subject="[candle] backtest type2 :  2024.01.01~  규칙: -→+ 직후 즉시 매수하지 않고 + 1일 연속 확인 후 10주 매수 / +→- 직후 즉시 매도하지 않고 - 1일 연속 확인 후 전량 매도" --body-file="./log-backtest-type2.log" --attach-file="./backtest_type2.csv"
+	uv run python -u gmail_sender.py --subject="[candle] backtest type2" --body-file="./log-backtest-type2.log" --attach-file="./backtest_type2.csv"
 
 backtest-type1-2:
 	set -o pipefail; uv run python -u backtest_type1_2.py | tee log-backtest-type1-2.log
 
 backtest-type4:
 	set -o pipefail; uv run python -u backtest_type4.py | tee log-backtest-type4.log
-	uv run python -u gmail_sender.py --subject="[candle] backtest type4 :  2024.01.01~  규칙: KOSPI 상위 30 / S&P500 상위 100 시가총액 조건을 만족하는 + 신호만 매수, - 신호면 매도" --body-file="./log-backtest-type4.log" --attach-file="./backtest_type4.csv"
+	uv run python -u gmail_sender.py --subject="[candle] backtest type4" --body-file="./log-backtest-type4.log" --attach-file="./backtest_type4.csv"
 
 backtest-type4-2:
 	set -o pipefail; uv run python -u backtest_type4_2.py | tee log-backtest-type4-2.log
@@ -98,49 +109,50 @@ all: fetch analyze backtest-type1 backtest-type2 backtest-type4 backtest-compare
 clean:
 	rm -rf data/stocks data/kospi_list.csv
 
-# ── v2 (src/candle 패키지) ─────────────────────────────────────────────────
+# ── v2 (src/candle 패키지) ────────────────────────────────────────────────────
 # 모든 v2 명령에 $(DEBUG) 가 붙습니다.
-# debug 켜기: make <target> DEBUG=--debug
-# 예) make v2-fetch DEBUG=--debug
-#     make v2-all   DEBUG=--debug
+# debug 켜기:    make <target> DEBUG=--debug
+# 메일 발송 켜기: make <target> SENDMAIL=YES
 
 v2-universe:
-	uv run candle universe --market all $(DEBUG)
+	set -o pipefail; uv run candle universe --market all $(DEBUG) | tee v2-universe.log
+	uv run python -u gmail_sender.py --subject="[candle][v2] v2-universe.log $$(date +%Y-%m-%d)" --body-file="./v2-universe.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-universe-small:
-	uv run candle universe --small $(DEBUG)
+	set -o pipefail; uv run candle universe --small $(DEBUG) | tee v2-universe-small.log
 
 v2-fetch:
-	uv run candle fetch --market all $(DEBUG)
+	set -o pipefail; uv run candle fetch --market all $(DEBUG) | tee v2-fetch.log
 
 v2-fetch-full:
-	uv run candle fetch --market all --from 2000-01-01 --workers 4 --timeout 30 $(DEBUG)
+	set -o pipefail; uv run candle fetch --market all --from 2000-01-01 --workers 4 --timeout 30 $(DEBUG) | tee v2-fetch-full.log
+	uv run python -u gmail_sender.py --subject="[candle][v2] v2-fetch-full.log $$(date +%Y-%m-%d)" --body-file="./v2-fetch-full.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-analyze:
-	uv run candle analyze --market all $(DEBUG)
+	set -o pipefail; uv run candle analyze --market all $(DEBUG) | tee v2-analyze.log
+	uv run python -u gmail_sender.py --subject="[candle][v2] v2-analyze.log $$(date +%Y-%m-%d)" --body-file="./v2-analyze.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-analyze-refresh:
-	uv run candle analyze --market all --refresh $(DEBUG)
+	set -o pipefail; uv run candle analyze --market all --refresh $(DEBUG) | tee v2-analyze-refresh.log
 
-# ── backtest 단독 (수동 실행용) ────────────────────────────────────────────
-# output/backtest/full/   output/backtest/5y/
+# ── backtest 단독 (수동 실행용) ────────────────────────────────────────────────
 v2-backtest-full:
-	uv run candle backtest --from 2000-01-01 --label full --market all $(DEBUG)
+	set -o pipefail; uv run candle backtest --from 2000-01-01 --label full --market all $(DEBUG) | tee v2-backtest-full.log
 
 v2-backtest-5y:
-	uv run candle backtest --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y --market all $(DEBUG)
+	set -o pipefail; uv run candle backtest --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y --market all $(DEBUG) | tee v2-backtest-5y.log
 
-# ── compare 단독 (수동 실행용) ─────────────────────────────────────────────
+# ── compare 단독 (수동 실행용) ─────────────────────────────────────────────────
 v2-compare:
-	uv run candle compare $(DEBUG)
+	set -o pipefail; uv run candle compare $(DEBUG) | tee v2-compare.log
 
 v2-compare-full:
-	uv run candle compare --from 2000-01-01 --label full $(DEBUG)
+	set -o pipefail; uv run candle compare --from 2000-01-01 --label full $(DEBUG) | tee v2-compare-full.log
 
 v2-compare-5y:
-	uv run candle compare --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y $(DEBUG)
+	set -o pipefail; uv run candle compare --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y $(DEBUG) | tee v2-compare-5y.log
 
-# ── backtest + compare 묶음 (label 기반, 순차 실행) ───────────────────────
+# ── backtest + compare 묶음 (label 기반, 순차 실행) ───────────────────────────
 # --label 로 고정 디렉터리명 사용 → 내년에도 같은 label 이 같은 디렉터리에 갱신됨
 # 새 기간 추가 시:
 #   1) v2-backtest-compare-<label> 타겟 정의
@@ -166,35 +178,49 @@ v2-backtest-compare-2000-2015:
 	uv run candle backtest --from 2000-01-01 --to 2016-01-01 --label 2000-2015 --market all $(DEBUG)
 	uv run candle compare  --from 2000-01-01 --to 2016-01-01 --label 2000-2015 $(DEBUG)
 
-# ── 병렬 실행 (v2-all 에서 사용) ───────────────────────────────────────────
-# full, 5y, 2010-2020 이 동시에 돌고, 각각 내부에서 backtest → compare 순으로 실행됨
-# 2000-2015 를 추가하려면 아래 줄 끝에 v2-backtest-compare-2000-2015 를 추가
+# ── 병렬 실행 (v2-all 에서 사용) ───────────────────────────────────────────────
 v2-backtest:
-	$(MAKE) -j v2-backtest-compare-full v2-backtest-compare-5y v2-backtest-compare-2010-2020 v2-backtest-compare-2000-2015 DEBUG="$(DEBUG)"
+	set -o pipefail; $(MAKE) -j v2-backtest-compare-full v2-backtest-compare-5y v2-backtest-compare-2010-2020 v2-backtest-compare-2000-2015 DEBUG="$(DEBUG)" | tee v2-backtest.log
+	uv run python -u gmail_sender.py --subject="[candle][v2] v2-backtest.log $$(date +%Y-%m-%d)" --body-file="./v2-backtest.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-simulate:
-	uv run candle simulate $(DEBUG)
+	set -o pipefail; uv run candle simulate $(DEBUG) | tee v2-simulate.log
+	uv run python -u gmail_sender.py --subject="[candle][v2] v2-simulate.log $$(date +%Y-%m-%d)" --body-file="./v2-simulate.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-simulate-noai:
-	uv run candle simulate --no-ai $(DEBUG)
+	set -o pipefail; uv run candle simulate --no-ai $(DEBUG) | tee v2-simulate-noai.log
 
 v2-dashboard:
-	uv run candle dashboard $(DEBUG)
+	set -o pipefail; uv run candle dashboard $(DEBUG) | tee v2-dashboard.log
+	uv run python -u gmail_sender.py --subject="[candle][v2] v2-dashboard.log $$(date +%Y-%m-%d)" --body-file="./v2-dashboard.log" --only-me --sendmail "$(SENDMAIL)"
+	uv run python -u gmail_sender.py \
+		--sendmail "$(SENDMAIL)" \
+		--subject="[candle][v2] 투자 리포트 $$(date +%Y-%m-%d)" \
+		--decisions-json="./dashboard_site/data/decisions.json" --only-me
 
-# ── optimize (v2-all 에 미포함 — 수동 실행) ───────────────────────────────
-# plus_days: 4~40 step 2 (19가지), minus_days: 4~10 step 2 (4가지) → 76 조합
-# 결과: output/optimize/streak_grid.csv + 상위 30개 터미널 출력
+# ── 전체 파이프라인 ────────────────────────────────────────────────────────────
+# SENDMAIL=YES 설정 시 완료 후 전체 수신자에게 메일 발송
+# 예) make v2-all SENDMAIL=YES
+#     make v2-all DEBUG=--debug SENDMAIL=YES
+v2-all: v2-universe v2-fetch-full v2-analyze v2-backtest v2-simulate v2-dashboard
+
+
+# ── optimize (v2-all 에 미포함 — 수동 실행) ───────────────────────────────────
+# type2_1b / type2_2b 의 plus_days(4~40 step2) × minus_days(4~10 step2) = 76 조합
+# --all-groups: 전체 + KOSPI200/SP500/ETF_KR/ETF_US 5개 결과 파일 생성
+# 결과: output/optimize/streak_grid_{all|KOSPI200|SP500|ETF_KR|ETF_US}.csv
 v2-optimize:
 	mkdir -p output/optimize
-	uv run candle optimize-streak \
-		--market all \
+	set -o pipefail; uv run candle optimize-streak \
+		--all-groups \
+		--output-dir output/optimize \
 		--plus-min 4 --plus-max 40 --plus-step 2 \
 		--minus-min 4 --minus-max 10 --minus-step 2 \
 		--top 30 \
-		--output output/optimize/streak_grid.csv \
-		$(DEBUG)
+		$(DEBUG) | tee v2-optimize.log
+	uv run python -u gmail_sender.py --subject="[candle][v2] v2-optimize.log $$(date +%Y-%m-%d)" --body-file="./v2-optimize.log" --only-me --sendmail "$(SENDMAIL)"
 
-# ── smoke (소규모 universe 빠른 검증) ─────────────────────────────────────
+# ── smoke (소규모 universe 빠른 검증) ─────────────────────────────────────────
 v2-smoke:
 	uv run candle universe --small $(DEBUG)
 	uv run candle fetch --market all $(DEBUG)
@@ -203,7 +229,3 @@ v2-smoke:
 	uv run candle compare $(DEBUG)
 	uv run candle simulate --no-ai $(DEBUG)
 	uv run candle dashboard $(DEBUG)
-
-# ── 전체 파이프라인 ────────────────────────────────────────────────────────
-# backtest / compare 내부에서 병렬 처리됨
-v2-all: v2-universe v2-fetch-full v2-analyze v2-backtest v2-simulate v2-dashboard

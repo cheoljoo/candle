@@ -161,10 +161,151 @@ def _load_ticker(cfg: config.Config, ticker: str, market: str,
         return None
 
 
-# ── 5. 그리드 서치 메인 ─────────────────────────────────────────────────
+ALL_GROUPS = ["KOSPI200", "SP500", "ETF_KR", "ETF_US"]
+
+
+def run_all_groups(
+    cfg: config.Config,
+    output_dir: Path,
+    start: date | None = None,
+    end: date | None = None,
+    plus_min: int = 4,
+    plus_max: int = 40,
+    plus_step: int = 2,
+    minus_min: int = 4,
+    minus_max: int = 10,
+    minus_step: int = 2,
+    workers: int = 4,
+    top_n: int = 30,
+) -> dict[str, pd.DataFrame]:
+    """전체(all) + 4개 그룹별 그리드 서치를 한번에 실행.
+
+    ticker 로딩은 1회만 수행하고, 각 그룹 필터링 후 grid search.
+    output_dir 아래에 streak_grid_{group}.csv 5개 저장.
+    반환: {group_label: result_df}
+    """
+    inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+    if inst.empty:
+        log.error("instruments.csv 없음. universe 먼저 실행")
+        return {}
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    initial_capital = cfg.strategies["initial_capital"]
+
+    # ── 1회 streak 로딩 (전체) ────────────────────────────────────────
+    tprint(f"[streak_grid] 전체 ticker streak 로딩 중... ({len(inst)}개, workers={workers})", flush=True)
+    t0 = time.perf_counter()
+    ticker_list = [(str(r["ticker"]), str(r["market"]), str(r["currency"]),
+                    str(r.get("group_name", "")))
+                   for _, r in inst.iterrows()]
+
+    loaded_all: list[tuple] = []
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {
+            ex.submit(_load_ticker, cfg, tk, mkt, start, end): (tk, mkt, cur, grp)
+            for tk, mkt, cur, grp in ticker_list
+        }
+        done = 0
+        for fut in as_completed(futs):
+            done += 1
+            if done % 100 == 0 or done == len(futs):
+                tprint(f"[streak_grid]   로딩 {done}/{len(futs)}", flush=True)
+            result = fut.result()
+            if result is not None:
+                tk, mkt, cur, grp = futs[fut]
+                ticker, events, last_close = result
+                ic = float(initial_capital.get("KRW" if mkt == "KR" else "USD", 1000))
+                loaded_all.append((ticker, events, last_close, ic, grp))
+
+    tprint(f"[streak_grid] 로딩 완료 — 유효 {len(loaded_all)}개, elapsed={time.perf_counter()-t0:.1f}s", flush=True)
+    if not loaded_all:
+        return {}
+
+    # ── 5개 그룹 순서로 grid search ───────────────────────────────────
+    # ── 메타데이터 저장 ─────────────────────────────────────────────────
+    import json as _json
+    from datetime import datetime as _dt
+    meta = {
+        "run_date":   _dt.now().strftime("%Y-%m-%d %H:%M"),
+        "data_from":  start.isoformat() if start else "2000-01-01",
+        "data_to":    end.isoformat() if end else _dt.today().strftime("%Y-%m-%d"),
+        "plus_range": f"{plus_min}~{plus_max} step {plus_step}",
+        "minus_range": f"{minus_min}~{minus_max} step {minus_step}",
+        "n_combos":   len(range(plus_min, plus_max+1, plus_step)) * len(range(minus_min, minus_max+1, minus_step)),
+        "n_tickers_total": len(loaded_all),
+    }
+    (output_dir / "streak_grid_meta.json").write_text(
+        _json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    results: dict[str, pd.DataFrame] = {}
+    targets = [("all", loaded_all)] + [
+        (g, [(tk, ev, lc, ic, grp) for tk, ev, lc, ic, grp in loaded_all if grp == g])
+        for g in ALL_GROUPS
+    ]
+
+    for group_label, loaded in targets:
+        if not loaded:
+            tprint(f"[streak_grid] {group_label}: 데이터 없음, 건너뜀", flush=True)
+            continue
+        tprint(f"[streak_grid] [{group_label}] 그리드 서치 시작 — {len(loaded)}개 ticker", flush=True)
+        df = _grid_search(loaded, plus_min, plus_max, plus_step,
+                          minus_min, minus_max, minus_step, top_n, group_label)
+        out_csv = output_dir / f"streak_grid_{group_label}.csv"
+        df.to_csv(out_csv, index=False)
+        tprint(f"[streak_grid] [{group_label}] 완료 → {out_csv.name}", flush=True)
+        results[group_label] = df
+
+    return results
+
+
+def _grid_search(
+    loaded: list[tuple],
+    plus_min: int, plus_max: int, plus_step: int,
+    minus_min: int, minus_max: int, minus_step: int,
+    top_n: int, label: str = "",
+) -> pd.DataFrame:
+    """loaded = [(ticker, events, last_close, ic, group), ...] 로 grid search."""
+    p_range = range(plus_min, plus_max + 1, plus_step)
+    m_range = range(minus_min, minus_max + 1, minus_step)
+    n_combos = len(p_range) * len(m_range)
+
+    rows: list[dict] = []
+    done = 0
+    t0 = time.perf_counter()
+    for p in p_range:
+        for m in m_range:
+            returns = [_simulate_one(ev, p, m, ic, lc)
+                       for _, ev, lc, ic, *_ in loaded]
+            s = pd.Series(returns)
+            rows.append({
+                "plus_days":     p,
+                "minus_days":    m,
+                "avg_return":    round(float(s.mean()), 4),
+                "median_return": round(float(s.median()), 4),
+                "n_positive":    int((s > 0).sum()),
+                "n_total":       len(returns),
+                "hit_rate":      round(float((s > 0).mean() * 100), 2),
+            })
+            done += 1
+            if done % 20 == 0 or done == n_combos:
+                elapsed = time.perf_counter() - t0
+                eta = elapsed / done * (n_combos - done) if done < n_combos else 0
+                tprint(f"[streak_grid] [{label}]   {done}/{n_combos} ({elapsed:.0f}s, 잔여 ~{eta:.0f}s)", flush=True)
+
+    result_df = pd.DataFrame(rows).sort_values("avg_return", ascending=False).reset_index(drop=True)
+    best = result_df.iloc[0]
+    tprint(f"[streak_grid] [{label}] ★ 최적: plus={best.plus_days} minus={best.minus_days} "
+           f"avg={best.avg_return:.1f}% hit={best.hit_rate:.1f}%", flush=True)
+    tprint(f"\n[streak_grid] [{label}] === 상위 {min(top_n, len(result_df))}개 ===")
+    print(result_df.head(top_n).to_string(index=False))
+    return result_df
+
+
+# ── 5. 그리드 서치 메인 (단일 그룹) ─────────────────────────────────────
 def run(
     cfg: config.Config,
     market:     str   = "all",
+    group_name: str | None = None,
     start:      date | None = None,
     end:        date | None = None,
     plus_min:   int   = 2,
@@ -191,6 +332,8 @@ def run(
 
     if market != "all":
         inst = inst[inst["market"] == market.upper()]
+    if group_name:
+        inst = inst[inst["group_name"] == group_name]
 
     initial_capital = cfg.strategies["initial_capital"]
 
@@ -229,63 +372,15 @@ def run(
         return pd.DataFrame()
 
     # --- (plus_days, minus_days) 그리드 서치 ---
-    p_range = range(plus_min,  plus_max  + 1, plus_step)
-    m_range = range(minus_min, minus_max + 1, minus_step)
-    n_combos = len(p_range) * len(m_range)
-
-    tprint(f"[streak_grid] 그리드 서치 시작: plus={plus_min}~{plus_max} step={plus_step}, "
-          f"minus={minus_min}~{minus_max} step={minus_step}", flush=True)
-    tprint(f"[streak_grid]   조합 수={n_combos}, ticker={len(loaded)}", flush=True)
-    t0 = time.perf_counter()
-
-    rows: list[dict] = []
-    done = 0
-
-    for p in p_range:
-        for m in m_range:
-            returns: list[float] = []
-            for ticker, events, last_close, ic in loaded:
-                ret = _simulate_one(events, p, m, ic, last_close)
-                returns.append(ret)
-
-            if not returns:
-                continue
-
-            s = pd.Series(returns)
-            rows.append({
-                "plus_days":    p,
-                "minus_days":   m,
-                "avg_return":   round(float(s.mean()), 4),
-                "median_return": round(float(s.median()), 4),
-                "n_positive":   int((s > 0).sum()),
-                "n_total":      len(returns),
-                "hit_rate":     round(float((s > 0).mean() * 100), 2),
-            })
-            done += 1
-            if done % 100 == 0 or done == n_combos:
-                elapsed = time.perf_counter() - t0
-                eta = elapsed / done * (n_combos - done) if done < n_combos else 0
-                tprint(f"[streak_grid]   {done}/{n_combos} 완료 "
-                       f"({elapsed:.0f}s 경과, 잔여 ~{eta:.0f}s)", flush=True)
-
-    result_df = pd.DataFrame(rows).sort_values("avg_return", ascending=False).reset_index(drop=True)
-
-    # 상위 N개 출력
-    tprint(f"\n[streak_grid] === 상위 {min(top_n, len(result_df))}개 (avg_return 기준) ===")
-    print(result_df.head(top_n).to_string(index=False))  # 표 데이터는 timestamp 불필요
-
-    # 최적값 강조
-    best = result_df.iloc[0]
-    tprint(f"\n[streak_grid] ★ 최적 파라미터: plus_days={best.plus_days}, "
-           f"minus_days={best.minus_days}  "
-           f"avg_return={best.avg_return:.2f}%  "
-           f"hit_rate={best.hit_rate:.1f}%")
+    lbl = group_name or market
+    result_df = _grid_search(loaded, plus_min, plus_max, plus_step,
+                              minus_min, minus_max, minus_step, top_n, lbl)
 
     # CSV 저장
     if output_csv:
         result_df.to_csv(output_csv, index=False)
         tprint(f"[streak_grid] 전체 결과 저장: {output_csv}", flush=True)
 
-    total_elapsed = time.perf_counter() - t0
+    total_elapsed = 0  # _grid_search 내부 측정
     tprint(f"[streak_grid] 완료 — 전체 {total_elapsed:.1f}s", flush=True)
     return result_df

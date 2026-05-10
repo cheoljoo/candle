@@ -1,6 +1,6 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-10 (2차)
+date: 2026-05-10 (4차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
@@ -46,7 +46,8 @@ candle/
 ├── config/
 │   ├── universe.yml             # 그룹 정의 + ETF 고정 list + small_universe
 │   ├── strategies.yml           # type별 파라미터, 초기자본(KRW/USD)
-│   └── runtime.yml              # cron, 경로, log level, history_start, fetch timeout
+│   ├── runtime.yml              # cron, 경로, log level, history_start, fetch timeout
+│   └── recipients.yml           # 메일 수신자 목록 (owner, recipients, dashboard_url)
 ├── src/candle/
 │   ├── cli.py                   # typer 진입점 (모든 subcommand)
 │   ├── config.py                # YAML loader
@@ -122,10 +123,11 @@ candle compare  --from DATE [--to DATE] [--label LABEL] [--debug]
 candle simulate [--no-ai] [--debug]
 candle dashboard [--out DIR] [--debug]
 candle optimize-streak --market all
+                       [--all-groups]              # 전체+4그룹 5개 파일 동시 생성
+                       [--output-dir output/optimize/]
                        [--plus-min 4] [--plus-max 40] [--plus-step 2]
                        [--minus-min 4] [--minus-max 10] [--minus-step 2]
-                       [--workers 4] [--top 30] [--output CSV경로]
-                       [--from DATE] [--to DATE]
+                       [--workers 4] [--top 30]
 ```
 
 **주요 옵션 설명**
@@ -293,37 +295,34 @@ output/backtest/5y/       ← --label 5y (5년전~, 매일 갱신)
 output/backtest/2010-2020/ ← --label 2010-2020 (고정 기간)
 ```
 
-### ✅ Optimize — plus_days / minus_days 그리드 서치 (별도 실행)
+### ✅ Optimize — type2_1b/type2_2b plus_days/minus_days 그리드 서치 (별도 실행)
 
 > `v2-all` 에 미포함. `make v2-optimize` 로 수동 실행.
 
-- **목적**: type2_2 계열(N일 연속 상승 → 전액 매수 / M일 연속 하락 → 전량 매도)의 최적 `plus_days` / `minus_days` 탐색.
+- **목적**: type2_1b/type2_2b(연속일수 신호) 전략의 최적 `plus_days`/`minus_days` 탐색.
 - **구현**: `src/candle/optimize/streak_grid.py`
 - **알고리즘 (3단계)**:
-  1. **streak 사전 계산** (ticker당 1회): 각 일봉의 `ma10m_updown` 연속 방향(streak_sign)·연속 일수(streak_len) 산출. Thread pool으로 병렬 로딩.
-  2. **이벤트 추출**: `streak_len==P` 인 날 = "P일째 첫 매수 신호", `streak_len==M` = "M일째 첫 매도 신호". 미리 분류해 (P, M) 조합 반복 비용 최소화.
-  3. **그리드 서치**: 모든 (P, M) 조합 × 전 ticker 시뮬레이션. 결과 = `(plus_days, minus_days, avg_return, median_return, n_positive, n_total, hit_rate)`.
+  1. **streak 사전 계산** (ticker당 1회, thread pool): 각 일봉의 `ma10m_updown` 연속 방향/일수 산출.
+  2. **이벤트 추출**: `streak_len==P` 인 날 = "P일째 첫 매수 신호". (P,M) 조합 반복 비용 최소화.
+  3. **그리드 서치**: 76 조합 × 전 ticker 시뮬레이션.
 - **기본 탐색 범위**: `plus 4~40 step 2` (19가지) × `minus 4~10 step 2` (4가지) = **76 조합**.
-- **출력**: 상위 30개 터미널 출력 + `output/optimize/streak_grid.csv` 전체 저장.
+- **`--all-groups`**: 전체(all) + KOSPI200/SP500/ETF_KR/ETF_US 5개 그룹 **동시 실행** (ticker 1회 로딩).
+  - 출력: `output/optimize/streak_grid_{all|KOSPI200|SP500|ETF_KR|ETF_US}.csv`
+  - 메타: `output/optimize/streak_grid_meta.json` (실행일시, 데이터 구간, 파라미터 범위)
 
 ```
-make v2-optimize            # 기본 범위 실행 (76 조합)
-make v2-optimize DEBUG=--debug  # 상세 출력 포함
+make v2-optimize            # --all-groups: 5개 그룹 결과 동시 생성
+make v2-optimize DEBUG=--debug
 ```
 
 **결과 CSV 컬럼:**
 ```
 plus_days, minus_days, avg_return, median_return, n_positive, n_total, hit_rate
 ```
-- `avg_return`: 전 ticker 평균 수익률(%). 이 값으로 정렬.
-- `hit_rate`: 수익 플러스 비율(%).
 
-**최적 파라미터 적용 방법** — `config/strategies.yml` 에서 type2_1b/type2_2b 값 수정:
+**최적 파라미터 적용** — `config/strategies.yml` 수정 후 `make v2-backtest`:
 ```yaml
 type2_1b:
-  plus_days: <최적값>
-  minus_days: <최적값>
-type2_2b:
   plus_days: <최적값>
   minus_days: <최적값>
 ```
@@ -359,21 +358,23 @@ type2_2b:
 | `etf_us.html` | ETF_US 종목 × 기간 수익률 |
 | `compare.html` | 전략×그룹별 요약 (period 탭, TOTAL 행 포함) |
 | `decisions.html` | 오늘의 의사결정 (RANK 컬럼, rule/AI/manual + type 필터) |
-| `docs.html` | 문서 뷰어 (claude/ .md 파일, Markdown/Raw 토글) |
+| `docs.html` | 문서 뷰어 (claude/ *.md 자동 수집, Markdown/Raw 토글) |
+| `optimize.html` | type2 파라미터 최적화 결과 (그룹 탭 + 히트맵 + 실행 메타) |
 
-- **공통 템플릿**:
-  - `_nav.html`: 모든 페이지 공통 내비게이션
-  - `_type_legend.html`: 전략 코드 설명 범례 (`<details>` 접기)
-  - `group_returns.html`: 그룹별 수익률 테이블 (공통)
-- **decisions 페이지 기능**:
-  - 탭: Rule / AI / Manual (탭 전환 시 type_filter 리셋)
-  - Rule 탭 선택 시 type 필터 버튼 표시: `전체 | type1_1(N) | type1_2(N) | type2_1(N) | type2_2(N)`
-  - type3 (적립식) rule 신호는 표시에서 제외
-  - 컬럼: 그룹, **RANK**(비ETF만), Ticker, 종목명, 전략(코드+설명), Action, Qty, Price, Reason
-- **docs 페이지 기능**:
-  - 왼쪽 사이드바: claude/ 내 .md 목록 선택 (Alpine.js)
-  - 오른쪽: **Markdown**(marked.js + highlight.js) / **Raw** 토글
-  - 표시 순서: README → 아키텍처 가이드 → 요구사항 → 작업 이력 → Gemini 분석
+- **공통 템플릿**: `_nav.html` · `_type_legend.html` · `group_returns.html` · `_download.html`
+- **favicon**: 모든 페이지 🕯️ SVG data URI inline
+- **decisions 페이지**: RANK 컬럼(비ETF), Rule/AI/Manual 탭, type 필터, CSV 다운로드
+- **docs 페이지**:
+  - `claude/*.md` 파일을 **자동 수집** (새 파일 추가 → 코드 수정 없이 자동 표시)
+  - `_DOC_ORDER` 에 있는 파일은 지정 순서, 없는 파일은 알파벳 순 자동 추가
+  - 현재 파일: README · 아키텍처 가이드 · 요구사항 · 작업 이력 · 메시지/노트 · Gemini 분석
+  - Markdown 렌더링(marked.js + highlight.js) / Raw 토글
+- **optimize 페이지**:
+  - type2_1b/type2_2b 전략 설명 + 파라미터 적용 가이드
+  - 그룹 탭: 전체(718종목) / KOSPI200 / SP500 / ETF_KR / ETF_US
+  - 실행 메타 카드: 실행일시 · 데이터 구간 · 종목수 · 조합수
+  - 히트맵 (plus_days × minus_days, 색상으로 avg_return 표시)
+- **CSV 다운로드** (`_download.html`): compare / decisions / group_returns / optimize 모두 지원
 
 ### ✅ Phase 6 — 자동화
 - `Makefile` `v2-all` 전체 파이프라인
@@ -467,6 +468,41 @@ uv run candle universe --market all
 
 `output/simulate/manual_input.csv` 를 사용자가 직접 편집 후 `candle simulate` 재실행.
 
+### 5.4 메일 발송 — `gmail_sender.py`
+
+**설정** : `config/recipients.yml`
+```yaml
+owner: cheoljoo@gmail.com
+dashboard_url: "http://psncs.iptime.org/stock_candle"
+recipients:
+  - email: cheoljoo.lee@lge.com
+  ...  # 11명
+```
+
+**발송 방식** : 각 수신자에게 **개별 To: (1인 1메일)** — 추후 개인별 맞춤 내용 대비
+
+**주요 옵션**:
+| 옵션 | 설명 |
+|------|------|
+| `--subject TEXT` | 메일 제목 |
+| `--decisions-json PATH` | decisions.json 기반 본문 자동 생성 (BUY/SELL 요약 + 대시보드 링크) |
+| `--body-file PATH` | 직접 본문 파일 지정 (기존 호환) |
+| `--attach-file PATH` | 첨부 파일 (선택) |
+| `--sendmail TEXT` | 발송 활성화값. 빈값/미지정이면 즉시 종료 (skip). 예: YES |
+| `--only-me` | owner 에게만 발송 (테스트) |
+
+**Makefile 타겟**:
+```bash
+make v2-mail      # 전체 수신자 발송 (decisions.json 자동 본문)
+make v2-mail-me   # owner만 테스트 발송
+```
+
+**자동 생성 본문 구조**:
+- 오늘 날짜 + 대시보드 URL
+- 📈 BUY 신호 N종목 (그룹·순위·가격·전략 포함)
+- 📉 SELL 신호 N종목
+- 전략 설명 표 (type3 적립식 제외)
+
 ---
 
 ## 6. 대시보드 현행 구조
@@ -541,7 +577,7 @@ dashboard_site/data/
 
 | 항목 | 우선순위 | 메모 |
 |------|---------|------|
-| **nginx /stock_candle 서비스** | 높 | `/tmp/candle_nginx.conf` 작성 완료. 일반 터미널에서 `sudo cp /tmp/candle_nginx.conf /etc/nginx/conf.d/candle.conf && sudo nginx -t && sudo systemctl reload nginx` 실행 필요 |
+| **nginx /news/ 서비스** | 높 | `candle.conf`에 location 추가 완료. `sudo systemctl reload nginx` 실행 필요 |
 | 종목 편출입 강제 매도 | 중 | `membership.to_date` D-1 종가 매도 |
 | dotenv 자동 로드 | 하 | `cli.py` 에 `load_dotenv()` 추가 → KRX_ID/PW `.env` 자동 인식 |
 | analyze ranking 증분 | 중 | 현재 그룹 전체 재계산 → 신규 date만 처리로 최적화 |
@@ -549,8 +585,7 @@ dashboard_site/data/
 | dashboard FastAPI 2차 | 낮 | 수동 입력 폼 UI (현재는 CSV 직접 편집) |
 | v2 market_cap 저장 수정 | 중 | yfinance fast_info 가 현재 None 반환 → US/KR daily CSV 의 market_cap/rank_in_group 비어 있음. dashboard RANK 는 legacy `data/{kospi,sp500}_daily_rank.csv` 로 workaround 중 |
 | 백테스트 편입 전 종목 필터 | 중 | 매수 시점에 KOSPI200/SP500 구성원인 종목만 매수 |
-| gmail 리포트 | 하 | 기존 `gmail_sender.py` 재연결 |
 
 ---
 
-부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-10 (2차).
+부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-10 (4차).

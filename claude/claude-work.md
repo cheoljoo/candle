@@ -438,3 +438,96 @@
     - 상단: 파일명 + 줄 수 표시.
   - 표시 순서: README → 아키텍처 가이드 → 요구사항 → 작업 이력 → Gemini 분석.
 - **검증** : `candle dashboard` → `docs.html 완료 — 5개 문서`. 내비게이션에 "문서" 링크 확인.
+
+### gmail_sender.py 전면 재작성 — 개별 To: 발송 + 자동 본문 생성
+
+- **요청** : 수신자 목록을 config 파일로 관리. BCC→개별 To: 방식 변경. `--only-me` 플래그 추가. 의사결정 요약 자동 본문 생성.
+- **수정**
+  - `config/recipients.yml` (신규): `owner`, `dashboard_url`, `recipients` 목록(11명) 관리.
+  - `gmail_sender.py` 전면 재작성:
+    - `_load_recipients()`: `config/recipients.yml` 에서 수신자 목록 로드.
+    - `_build_body_from_decisions(json_path, url)`: `decisions.json` 읽어 BUY/SELL 종목 목록 + 그룹/순위/가격/전략 + 대시보드 링크 + 전략 설명 포함 본문 자동 생성. type3(적립식) 제외.
+    - `_send_one(...)`: 수신자 1인 개별 To: 발송.
+    - `--only-me`: owner 에게만 발송 (테스트 용).
+    - `--decisions-json`: decisions.json 경로 지정 시 본문 자동 생성.
+    - `--body-file`: 기존 방식 호환.
+    - 기존 BCC 하드코딩 완전 제거.
+  - `Makefile` : `v2-mail` (전체 수신자) / `v2-mail-me` (owner만 테스트) 타겟 추가.
+  - `v2-universe` 타겟의 잘못된 gmail 호출 제거.
+- **검증** : `_build_body_from_decisions` 테스트 — BUY 10종목 (삼양식품 KOSPI200 77위 등) 정상 출력 확인.
+
+### Dashboard 테이블 CSV 다운로드 버튼
+
+- **요청** : dashboard 모든 테이블에 CSV 다운로드 버튼/링크 추가.
+- **수정**
+  - `templates/_download.html` (신규): `downloadTableCSV(tableId, filename)` 공통 JS 헬퍼. UTF-8 BOM 포함 (Excel 한글 깨짐 방지). Blob URL 방식.
+  - `templates/compare.html`: 기간 탭별 테이블에 `id="cmp-tbl-N"` + "⬇ CSV 다운로드" 버튼.
+  - `templates/decisions.html`: `id="dec-tbl"` + "⬇ CSV 다운로드" 버튼.
+  - `templates/group_returns.html`: `id="ret-tbl"` + "⬇ CSV 다운로드" 버튼 (그룹명 포함 파일명).
+  - 모든 페이지에 `{% include "_download.html" %}` 추가.
+- **검증** : `candle dashboard` 정상 완료. compare/decisions/group_returns HTML 에 다운로드 버튼 포함 확인.
+
+### nginx /news/ 서비스 복구 진단
+
+- **상황** : `http://psncs.iptime.org/news/` 404, `http://psncs.iptime.org/stock_candle/` 200.
+- **원인 분석**
+  - `/etc/nginx/conf.d/candle.conf` 에 `/news/` location 없었음.
+  - `/etc/nginx/sites-enabled/news-arcade` → `sites-available/news-arcade` 심볼릭 링크는 존재하나, `candle.conf`와 동일 `server_name psncs.iptime.org`로 충돌. nginx는 `conf.d/*.conf`(먼저 로드)만 사용.
+  - `my-news/web/index.html` 존재, `data/news.json`(1.2MB) + `categories.json` 존재. 파일 권한(755/644) 정상.
+  - `index.html`이 `fetch('/news/data/news.json')` + `fetch('/news/data/categories.json')` 사용 → `/news/data/` 별도 location 필요.
+- **수정** (`/tmp/candle_nginx.conf` 작성, sudo 적용 필요)
+  - `candle.conf`에 `/news/` + `/news/data/` + `location = /news` 리다이렉트 추가.
+  - `/news/` → alias `/home/cheoljoo/code/my-news/web/`
+  - `/news/data/` → alias `/home/cheoljoo/code/my-news/data/` (CORS 허용)
+- **적용 명령** : `sudo cp /tmp/candle_nginx.conf /etc/nginx/conf.d/candle.conf && sudo nginx -t && sudo systemctl reload nginx`
+- **핵심** : 설정 파일 변경 후 **반드시 `sudo systemctl reload nginx`** 실행 필요. 미실행 시 기존 설정으로 계속 서비스됨.
+
+### Makefile SENDMAIL 플래그 — `--sendmail` 인수 방식으로 변경
+
+- **요청** : Makefile의 조건부 `if` 블록 대신 `gmail_sender.py`에 `--sendmail "$(SENDMAIL)"` 을 항상 전달하고, py 내부에서 판단.
+- **수정**
+  - `gmail_sender.py` : `--sendmail` 인수 추가. 빈값/미지정이면 `"SENDMAIL 값 없음 — 건너뜀"` 출력 후 즉시 return. `--subject` 를 required → default 로 변경.
+  - `Makefile` : `define SEND_MAIL` 매크로 제거. `v2-all` 에서 `--sendmail "$(SENDMAIL)"` 항상 전달. `v2-mail`/`v2-mail-me` 에 `--sendmail YES` 명시.
+  - `SENDMAIL ?= YES` (기본값을 YES로 — 사용자가 변경). 미발송 시 `SENDMAIL=` 으로 빈값 전달.
+  - `v2-universe` 잘못된 gmail 호출 제거. 로그 파일 `.og` 오타 → `.log` 수정.
+- **검증** : `make -n v2-all SENDMAIL=YES` → `--sendmail "YES"` 정상 전달. `uv run python -u gmail_sender.py --sendmail "" --subject="test"` → 건너뜀 확인.
+
+### Dashboard favicon 추가
+
+- **요청** : 모든 dashboard 페이지에 촛불 아이콘 추가.
+- **수정** : 5개 템플릿(index/compare/decisions/docs/group_returns) + optimize.html 에 인라인 SVG data URI favicon 추가.
+  ```html
+  <link rel="icon" href="data:image/svg+xml,<svg ...><text>🕯️</text></svg>">
+  ```
+
+### optimize 페이지 전면 개선 — 그룹별 + 구간 표시 + JS 버그 수정
+
+- **요청 1** : type2_1b/type2_2b 파라미터 최적화임을 명시.
+- **요청 2** : 그룹별(KOSPI200/SP500/ETF_KR/ETF_US/전체) 결과를 각기 보여주고 탭으로 선택.
+- **요청 3** : 어떤 구간의 시험인지 표시.
+- **버그** : Alpine.js `get` 문법이 초기 렌더 전에 JS 코드로 화면에 노출.
+- **수정**
+  - `streak_grid.py`
+    - `run_all_groups(cfg, output_dir, ...)` 신규: ticker 1회 로딩 후 5개 그룹(all+KOSPI200/SP500/ETF_KR/ETF_US) 순차 grid search. 각 `streak_grid_{group}.csv` 저장.
+    - `streak_grid_meta.json` 저장: `run_date`, `data_from/to`, `plus_range`, `minus_range`, `n_combos`, `n_tickers_total`.
+    - `_grid_search()` 헬퍼 추출 (run/run_all_groups 공용).
+  - `cli.py` : `--all-groups` (5개 동시 실행) + `--output-dir` 옵션 추가.
+  - `Makefile` `v2-optimize` : `--all-groups --output-dir output/optimize` 사용.
+  - `render.py` `_load_optimize_results()` : `{group: [rows], _meta: [...]}` dict 반환. 기존 `streak_grid.csv` → `streak_grid_all` fallback 지원.
+  - `templates/optimize.html` 전면 재작성:
+    - Alpine.js `get` 문법 → 일반 메서드(`sortedRows: function() {...}`)로 교체.
+    - `optApp()` 함수를 `<head>` 에 배치 (Alpine.js `defer` 보다 먼저 정의).
+    - `x-cloak` 추가 (Alpine 처리 전 숨김).
+    - 실행 정보 카드: 실행일시/데이터구간/종목수/조합수.
+    - 그룹 탭 + 히트맵 + 정렬 테이블.
+    - type2_1b/type2_2b 전략 설명 + 적용 방법 가이드.
+- **검증** : `candle dashboard` → `optimize.html 완료 — 전체 76개 조합`. JS 노출 없음 확인.
+
+### Dashboard 문서 페이지 — `msg.md` 추가 + 완전 자동화
+
+- **요청** : `./claude/msg.md` 를 대시보드 문서에 추가. 앞으로 `claude/*.md` 추가 시 자동 반영.
+- **수정** (`render.py`)
+  - `_DOC_LABELS` 에 `"msg": "메시지/노트"` 추가.
+  - `_DOC_ORDER` 에 `"msg"` 추가 (claude-work 다음).
+  - `_load_docs()` docstring 명확화: **목록에 없는 새 *.md 파일은 알파벳 순으로 자동 추가됨** (코드 수정 불필요).
+- **동작** : `claude/` 에 새 `.md` 파일 추가 → `make v2-dashboard` 실행만으로 문서 페이지에 자동 노출.

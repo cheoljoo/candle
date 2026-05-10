@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕯️</text></svg>">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>의사결정 — Candle</title>
   <script src="https://cdn.tailwindcss.com"></script>
@@ -32,6 +33,7 @@
 
   {# 전략 코드 설명 범례 #}
   {% include "_type_legend.html" %}
+{% include "_download.html" %}
 
   {# 오늘의 의사결정 — type3(적립식) rule은 render.py에서 제외됨 #}
   <section class="bg-white rounded-lg shadow-sm p-4">
@@ -75,8 +77,14 @@
     </div>
 
     {# ── 테이블 ── #}
+    <div class="flex justify-end mb-2">
+      <button onclick="downloadTableCSV('dec-tbl', 'decisions_today.csv')"
+              class="text-xs px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600">
+        ⬇ CSV 다운로드
+      </button>
+    </div>
     <div class="overflow-x-auto">
-      <table class="min-w-full text-sm">
+      <table id="dec-tbl" class="min-w-full text-sm">
         <thead class="bg-slate-100 text-slate-600 text-xs">
           <tr>
             <th class="text-left px-3 py-2">그룹</th>
