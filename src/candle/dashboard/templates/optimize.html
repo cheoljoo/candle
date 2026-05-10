@@ -13,25 +13,117 @@
 
   {# ── 데이터 및 Alpine 컴포넌트 — head에서 미리 정의 ── #}
   <script>
-  var OPT_DATA   = {{ opt_data   | tojson }};
-  var OPT_GROUPS = {{ opt_groups | tojson }};
-  var OPT_LABELS = {{ opt_labels | tojson }};
+  var OPT_DATA     = {{ opt_data     | tojson }};
+  var OPT_GROUPS   = {{ opt_groups   | tojson }};
+  var OPT_LABELS   = {{ opt_labels   | tojson }};
+  var ETF_NAME_MAP = {{ etf_name_map | tojson }};
+  var NAME_MAP = ETF_NAME_MAP;
+  var ETF_PER_TICKER_GROUPS = ['ETF_KR', 'ETF_US'];
+  var PER_TICKER_GROUPS = ['KOSPI200', 'SP500', 'ETF_KR', 'ETF_US'];
 
   var OPT_META = (OPT_DATA['_meta'] && OPT_DATA['_meta'][0]) ? OPT_DATA['_meta'][0] : {};
 
   function optApp() {
     return {
-      allData:   OPT_DATA,
-      groups:    OPT_GROUPS,
-      labels:    OPT_LABELS,
-      meta:      OPT_META,
-      curGroup:  'all',
-      sortCol:   'avg_return',
-      sortDir:   -1,
-      plusVals:  [4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40],
-      minusVals: [4,6,8,10],
+      allData:      OPT_DATA,
+      groups:       OPT_GROUPS,
+      labels:       OPT_LABELS,
+      meta:         OPT_META,
+      curGroup:     'all',
+      sortCol:      'avg_return',
+      sortDir:      -1,
+      plusVals:     [4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40],
+      minusVals:    [4,6,8,10],
+      // per-ticker (ETF only)
+      curTicker:    null,
+      tickerSortCol: 'avg_return',
+      tickerSortDir: -1,
 
-      init: function() { this.curGroup = 'all'; },
+      isEtfGroup: function() {
+        return ETF_PER_TICKER_GROUPS.indexOf(this.curGroup) >= 0;
+      },
+
+      isPerTickerGroup: function() {
+        return PER_TICKER_GROUPS.indexOf(this.curGroup) >= 0;
+      },
+
+      etfSummary: function() {
+        var key = this.curGroup + '_summary';
+        return this.allData[key] || {};
+      },
+
+      etfTickers: function() {
+        var sm = this.etfSummary();
+        var tickers = Object.keys(sm);
+        var col = this.tickerSortCol;
+        var dir = this.tickerSortDir;
+        return tickers.slice().sort(function(a, b) {
+          var va = sm[a] ? (sm[a][col] || 0) : 0;
+          var vb = sm[b] ? (sm[b][col] || 0) : 0;
+          return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+        });
+      },
+
+      etfTickerRows: function(ticker) {
+        var key = this.curGroup + '_tickers';
+        var tData = this.allData[key] || {};
+        return tData[ticker] || [];
+      },
+
+      tickerArrow: function(col) {
+        if (this.tickerSortCol !== col) return '⇕';
+        return this.tickerSortDir === -1 ? '↓' : '↑';
+      },
+
+      setTickerSort: function(col) {
+        if (this.tickerSortCol === col) this.tickerSortDir *= -1;
+        else { this.tickerSortCol = col; this.tickerSortDir = -1; }
+      },
+
+      tickerRetMap: function(ticker) {
+        var m = {};
+        var rows = this.etfTickerRows(ticker);
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          m[r.plus_days + '_' + r.minus_days] = +r.avg_return;
+        }
+        return m;
+      },
+
+      tickerMaxRet: function(ticker) {
+        var rows = this.etfTickerRows(ticker);
+        if (!rows.length) return 1;
+        var max = -Infinity;
+        for (var i = 0; i < rows.length; i++) {
+          var v = +rows[i].avg_return;
+          if (v > max) max = v;
+        }
+        return max || 1;
+      },
+
+      tickerHeatVal: function(ticker, p, m) {
+        var v = this.tickerRetMap(ticker)[p + '_' + m];
+        return v != null ? Math.round(v) + '%' : '-';
+      },
+      tickerHeatTitle: function(ticker, p, m) {
+        var v = this.tickerRetMap(ticker)[p + '_' + m];
+        return v != null ? 'plus=' + p + ' minus=' + m + ' return=' + v.toFixed(1) + '%' : '';
+      },
+      tickerHeatClass: function(ticker, p, m) {
+        var v = this.tickerRetMap(ticker)[p + '_' + m];
+        if (v == null) return 'bg-slate-100 text-slate-400';
+        var mx = this.tickerMaxRet(ticker);
+        var pct = mx > 0 ? v / mx * 100 : 0;
+        if (pct >= 90) return 'bg-emerald-600 text-white font-semibold';
+        if (pct >= 75) return 'bg-emerald-500 text-white';
+        if (pct >= 60) return 'bg-emerald-400 text-white';
+        if (pct >= 45) return 'bg-emerald-300 text-slate-800';
+        if (pct >= 30) return 'bg-emerald-200 text-slate-800';
+        if (v > 0)     return 'bg-emerald-100 text-slate-700';
+        return 'bg-rose-100 text-rose-700';
+      },
+
+      init: function() { this.curGroup = 'all'; this.curTicker = null; },
 
       curRows: function() {
         return this.allData[this.curGroup] || [];
@@ -73,6 +165,7 @@
         this.curGroup = g;
         this.sortCol  = 'avg_return';
         this.sortDir  = -1;
+        this.curTicker = null;  // 그룹 전환 시 ticker 선택 초기화
       },
 
       setSort: function(col) {
@@ -345,6 +438,221 @@
             </template>
           </tbody>
         </table>
+      </div>
+    </div>
+  </section>
+
+  {# ── 종목별 최적 파라미터 (종목별 데이터가 있는 그룹 탭 선택 시에만 표시) ──── #}
+  <section x-show="isPerTickerGroup()" class="bg-white rounded-lg shadow-sm p-5">
+    <h2 class="text-base font-semibold mb-1">🔍 종목별 최적 파라미터</h2>
+    <p class="text-xs text-slate-400 mb-4">각 종목에 대해 독립적으로 grid search를 수행한 결과입니다.
+      종목을 클릭하면 해당 종목만의 히트맵과 전체 조합 결과를 볼 수 있습니다.</p>
+
+    {# ── 데이터 없음 ─────────────────────────────────────────────────────── #}
+    <div x-show="Object.keys(etfSummary()).length === 0" class="text-sm text-slate-500 py-6 text-center">
+      <p>이 그룹의 종목별 최적화 결과가 없습니다.</p>
+      <p class="mt-1 text-xs text-slate-400"><code class="bg-slate-100 px-2 py-1 rounded">make v2-optimize</code> 실행 후 대시보드를 재생성하세요.</p>
+    </div>
+
+    <div x-show="Object.keys(etfSummary()).length > 0">
+
+      {# ── 종목 목록 (ticker 미선택) ────────────────────────────────────── #}
+      <div x-show="!curTicker">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs text-slate-500">종목 클릭 → 히트맵 + 전체 조합 보기</p>
+          <div class="flex gap-2 text-xs text-slate-400 select-none">
+            <button @click="setTickerSort('avg_return')"
+                    :class="tickerSortCol==='avg_return'?'text-blue-600 font-semibold':'hover:text-slate-600'"
+                    class="px-2 py-1 rounded bg-slate-100">
+              avg_return <span x-text="tickerArrow('avg_return')"></span>
+            </button>
+            <button @click="setTickerSort('hit_rate')"
+                    :class="tickerSortCol==='hit_rate'?'text-amber-600 font-semibold':'hover:text-slate-600'"
+                    class="px-2 py-1 rounded bg-slate-100">
+              hit_rate <span x-text="tickerArrow('hit_rate')"></span>
+            </button>
+            <button @click="setTickerSort('plus_days')"
+                    :class="tickerSortCol==='plus_days'?'text-emerald-600 font-semibold':'hover:text-slate-600'"
+                    class="px-2 py-1 rounded bg-slate-100">
+              plus_days <span x-text="tickerArrow('plus_days')"></span>
+            </button>
+            <button @click="setTickerSort('minus_days')"
+                    :class="tickerSortCol==='minus_days'?'text-rose-600 font-semibold':'hover:text-slate-600'"
+                    class="px-2 py-1 rounded bg-slate-100">
+              minus_days <span x-text="tickerArrow('minus_days')"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm border-collapse">
+            <thead class="bg-slate-100 text-slate-600 text-xs select-none">
+              <tr>
+                <th class="px-3 py-2 text-left">종목코드</th>
+                <th class="px-3 py-2 text-left">종목명</th>
+                <th class="px-3 py-2 text-right">
+                  최적 매수 연속일수<br>
+                  <span class="text-emerald-600 font-mono">plus_days</span>
+                </th>
+                <th class="px-3 py-2 text-right">
+                  최적 매도 연속일수<br>
+                  <span class="text-rose-600 font-mono">minus_days</span>
+                </th>
+                <th class="px-3 py-2 text-right">
+                  평균 수익률<br>
+                  <span class="text-blue-600 font-mono">avg_return</span>
+                </th>
+                <th class="px-3 py-2 text-right">
+                  승률<br>
+                  <span class="text-amber-600 font-mono">hit_rate</span>
+                </th>
+                <th class="px-3 py-2 text-center text-slate-400">히트맵</th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="tk in etfTickers()" :key="tk">
+                <tr class="border-t hover:bg-emerald-50 cursor-pointer"
+                    @click="curTicker = tk">
+                  <td class="px-3 py-2 font-mono font-semibold text-slate-700" x-text="tk"></td>
+                  <td class="px-3 py-2 text-slate-600 text-xs" x-text="ETF_NAME_MAP[tk] || '-'"></td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold text-emerald-700"
+                      x-text="(etfSummary()[tk] ? etfSummary()[tk].plus_days : '-') + (etfSummary()[tk] ? '일' : '')"></td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold text-rose-700"
+                      x-text="(etfSummary()[tk] ? etfSummary()[tk].minus_days : '-') + (etfSummary()[tk] ? '일' : '')"></td>
+                  <td class="px-3 py-2 text-right tabular-nums font-bold"
+                      :class="etfSummary()[tk] && etfSummary()[tk].avg_return >= 0 ? 'text-emerald-700' : 'text-rose-700'"
+                      x-text="etfSummary()[tk] ? (+etfSummary()[tk].avg_return).toLocaleString('ko-KR',{maximumFractionDigits:1}) + '%' : '-'"></td>
+                  <td class="px-3 py-2 text-right tabular-nums"
+                      :class="etfSummary()[tk] && etfSummary()[tk].hit_rate >= 80 ? 'text-emerald-600 font-semibold' : 'text-slate-600'"
+                      x-text="etfSummary()[tk] ? (+etfSummary()[tk].hit_rate).toFixed(1) + '%' : '-'"></td>
+                  <td class="px-3 py-2 text-center text-slate-400 text-xs">▶ 보기</td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {# ── 종목별 히트맵 상세 (ticker 선택 시) ─────────────────────────── #}
+      <div x-show="curTicker">
+        {# 헤더 #}
+        <div class="flex items-center gap-3 mb-4">
+          <button @click="curTicker = null"
+                  class="text-xs px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600">
+            ← 목록으로
+          </button>
+          <div>
+            <h3 class="text-base font-semibold text-slate-800"
+                x-text="'[' + curTicker + '] ' + (NAME_MAP[curTicker] || '')"></h3>
+            <p class="text-xs text-slate-400"
+               x-text="etfSummary()[curTicker]
+                 ? '최적: plus=' + etfSummary()[curTicker].plus_days + '일 / minus=' + etfSummary()[curTicker].minus_days + '일 / avg_return=' + (+etfSummary()[curTicker].avg_return).toFixed(1) + '% / hit_rate=' + (+etfSummary()[curTicker].hit_rate).toFixed(1) + '%'
+                 : ''"></p>
+          </div>
+        </div>
+
+        {# 히트맵 #}
+        <h4 class="text-sm font-semibold text-slate-600 mb-2">히트맵 — avg_return (매수 연속일수 × 매도 연속일수)</h4>
+        <p class="text-xs text-slate-400 mb-3">짙은 초록 = 높은 수익률 · 마우스 오버로 정확한 값 확인</p>
+        <div class="overflow-x-auto mb-6">
+          <table class="text-xs border-collapse">
+            <thead>
+              <tr>
+                <th class="px-2 py-1 text-right text-slate-400 font-normal text-xs">매수↓ / 매도→</th>
+                <template x-for="m in minusVals" :key="m">
+                  <th class="px-3 py-1 text-center font-mono font-semibold text-rose-700"
+                      x-text="m + '일'"></th>
+                </template>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="p in plusVals" :key="p">
+                <tr>
+                  <td class="px-2 py-1 text-right font-mono font-semibold text-emerald-700"
+                      x-text="p + '일'"></td>
+                  <template x-for="m in minusVals" :key="m">
+                    <td class="px-2 py-1 text-center tabular-nums rounded cursor-default"
+                        :class="tickerHeatClass(curTicker, p, m)"
+                        :title="tickerHeatTitle(curTicker, p, m)"
+                        x-text="tickerHeatVal(curTicker, p, m)"></td>
+                  </template>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+
+        {# 전체 조합 테이블 #}
+        <div class="flex items-center justify-between mb-2">
+          <h4 class="text-sm font-semibold text-slate-600">전체 조합 결과</h4>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400"
+                  x-text="etfTickerRows(curTicker).length + '개 조합'"></span>
+            <button @click="downloadTableCSV('opt-ticker-tbl', 'optimize_' + curGroup + '_' + curTicker + '.csv')"
+                    class="text-xs px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600">
+              ⬇ CSV 다운로드
+            </button>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400 mb-2">헤더 클릭 → 정렬 · <span class="text-emerald-600 font-semibold">상위 3위</span> 초록 강조</p>
+        <div class="overflow-x-auto">
+          <table id="opt-ticker-tbl" class="min-w-full text-sm border-collapse">
+            <thead class="bg-slate-100 text-slate-600 text-xs select-none">
+              <tr>
+                <th class="px-3 py-2 text-center">#</th>
+                <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200"
+                    @click="setTickerSort('plus_days')">
+                  매수 연속일수<br><span class="text-emerald-600 font-mono">plus_days</span>
+                  <span x-text="tickerArrow('plus_days')"></span></th>
+                <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200"
+                    @click="setTickerSort('minus_days')">
+                  매도 연속일수<br><span class="text-rose-600 font-mono">minus_days</span>
+                  <span x-text="tickerArrow('minus_days')"></span></th>
+                <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200"
+                    @click="setTickerSort('avg_return')">
+                  평균 수익률<br><span class="text-blue-600 font-mono">avg_return</span>
+                  <span x-text="tickerArrow('avg_return')"></span></th>
+                <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200"
+                    @click="setTickerSort('median_return')">
+                  중앙값 수익률<br><span class="text-violet-600 font-mono">median_return</span>
+                  <span x-text="tickerArrow('median_return')"></span></th>
+                <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200"
+                    @click="setTickerSort('hit_rate')">
+                  승률<br><span class="text-amber-600 font-mono">hit_rate</span>
+                  <span x-text="tickerArrow('hit_rate')"></span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <template x-for="(r, idx) in (function() {
+                var rows = etfTickerRows(curTicker).slice();
+                var col = tickerSortCol; var dir = tickerSortDir;
+                return rows.sort(function(a, b) {
+                  var va = (a[col] !== '' && a[col] != null) ? +a[col] : -Infinity;
+                  var vb = (b[col] !== '' && b[col] != null) ? +b[col] : -Infinity;
+                  return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
+                });
+              })()" :key="idx">
+                <tr class="border-t" :class="idx < 3 ? 'bg-emerald-50' : 'hover:bg-slate-50'">
+                  <td class="px-3 py-2 text-center text-xs"
+                      :class="idx === 0 ? 'font-bold text-emerald-700' : 'text-slate-400'"
+                      x-text="idx === 0 ? '🏆 1' : (idx + 1)"></td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold text-emerald-700"
+                      x-text="r.plus_days + '일'"></td>
+                  <td class="px-3 py-2 text-right font-mono font-semibold text-rose-700"
+                      x-text="r.minus_days + '일'"></td>
+                  <td class="px-3 py-2 text-right tabular-nums font-bold"
+                      :class="+r.avg_return >= 0 ? 'text-emerald-700' : 'text-rose-700'"
+                      x-text="(+r.avg_return).toLocaleString('ko-KR',{maximumFractionDigits:1}) + '%'"></td>
+                  <td class="px-3 py-2 text-right tabular-nums text-violet-700"
+                      x-text="(+r.median_return).toLocaleString('ko-KR',{maximumFractionDigits:1}) + '%'"></td>
+                  <td class="px-3 py-2 text-right tabular-nums"
+                      :class="+r.hit_rate >= 84 ? 'text-emerald-600 font-semibold' : 'text-slate-700'"
+                      x-text="(+r.hit_rate).toFixed(1) + '%'"></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   </section>

@@ -531,3 +531,69 @@
   - `_DOC_ORDER` 에 `"msg"` 추가 (claude-work 다음).
   - `_load_docs()` docstring 명확화: **목록에 없는 새 *.md 파일은 알파벳 순으로 자동 추가됨** (코드 수정 불필요).
 - **동작** : `claude/` 에 새 `.md` 파일 추가 → `make v2-dashboard` 실행만으로 문서 페이지에 자동 노출.
+
+---
+
+## 2026-05-11
+
+### ETF 종목별 optimize 대시보드 추가 — `optimize.html`
+
+- **요청** : ETF_KR/ETF_US 탭에서 그룹 전체 결과 외에 각 종목별 최적 파라미터 히트맵 + 조합 결과도 표시.
+- **배경** : 백엔드(`streak_grid.py` `run_per_ticker_group`)와 데이터 로딩(`render.py` `_load_optimize_results`)은 이미 구현 완료. 템플릿에 표시 섹션만 없었음.
+- **수정** (`templates/optimize.html`)
+  - `selectGroup()` JS 함수에 `this.curTicker = null;` 추가 (그룹 전환 시 종목 선택 초기화).
+  - ETF 그룹 탭 선택 시 표시되는 `<section x-show="isEtfGroup()">` 블록 추가:
+    - **종목 목록 뷰** (`!curTicker`): ETF 종목 요약 테이블 (ticker, 이름, 최적 plus/minus, avg_return, hit_rate). 컬럼 클릭으로 정렬.
+    - **종목 상세 뷰** (`curTicker`): "← 목록으로" 버튼 + 최적값 요약 + 히트맵(plusVals×minusVals) + 전체 조합 테이블 + CSV 다운로드.
+  - per-ticker 데이터 없으면 "make v2-optimize 실행 필요" 안내 메시지.
+- **수정** (`render.py`)
+  - ETF 종목 이름 lookup용 `etf_name_map` 구성 후 템플릿에 전달.
+
+### `_load_decisions` 날짜 fallback + 버그 수정
+
+- **증상** : `make v2-dashboard` 실행 시 (1) `ValueError: not enough values to unpack (expected 3, got 2)` crash. (2) 오늘의 의사결정 데이터 없음.
+- **원인**
+  - (1) `_load_decisions`가 `type_counts` 추가로 3→4값 반환하도록 수정됐는데, early-return 2곳만 2개 값 반환.
+  - (2) `date.today()=2026-05-11`(일요일)이지만 `decisions.csv`는 `2026-05-10`(금)까지만 존재 → 필터 결과 empty.
+- **수정** (`render.py` `_load_decisions`)
+  - early-return에 `{}`, `on_date.isoformat()` 추가 → 4-tuple 반환.
+  - `on_date` 필터 후 empty이면 `df["date"].max()` 로 **가장 최근 날짜 fallback**.
+  - `actual_date` 를 반환값에 포함, 호출부에서 `as_of=actual_date` 로 대시보드 날짜 표시.
+- **효과** : 주말/공휴일에 `make v2-dashboard` 실행해도 가장 최근 거래일 데이터 자동 표시.
+
+### decisions.html type2 코드 블록 강조 카드 제거
+
+- **요청** : "핵심: type2 계열은 정확히 N번째 날에만 선정" 코드 박스가 불필요. 아래 설명으로 충분.
+- **수정** : `templates/decisions.html` 에서 `⚠️` 인디고 강조 카드 전체 제거 (약 28줄).
+
+### streak_grid.py ETF per-ticker 병렬화
+
+- **분석** : `run_per_ticker_group()`의 종목별 순차 루프와 `run_all_groups()`의 ETF_KR/ETF_US 순차 처리가 병렬화 가능 포인트.
+- **수정**
+  - `run_per_ticker_group(workers: int = 4)` 파라미터 추가. 내부 `for` 루프 → `ThreadPoolExecutor(max_workers=min(workers, n))` 로 종목별 병렬 `_grid_search` + CSV write.
+  - `run_all_groups()`: ETF_KR/ETF_US 두 그룹을 `ThreadPoolExecutor(max_workers=2)` 로 동시 실행. `fut.result()`로 예외 즉시 전파.
+- **효과** : ETF_KR(11개) + ETF_US(7개) per-ticker grid search가 동시·병렬 처리로 속도 향상.
+
+### 전체 그룹 종목별 per-ticker 최적화 확장 (KOSPI200 / SP500 포함)
+
+- **요청** : ETF_KR/ETF_US에만 적용되던 종목별 grid search를 KOSPI200/SP500까지 포함한 4개 그룹 전체로 확장. dashboard도 동일 UI로 표시.
+- **수정** (`streak_grid.py`)
+  - `ETF_PER_TICKER_GROUPS = ["ETF_KR", "ETF_US"]` → `PER_TICKER_GROUPS = ["KOSPI200", "SP500", "ETF_KR", "ETF_US"]`
+  - `ThreadPoolExecutor(max_workers=2)` → `max_workers=4` (4개 그룹 동시 병렬)
+  - `_run_etf_group` → `_run_per_ticker_group` 로 rename
+- **수정** (`render.py`)
+  - `ETF_PER_TICKER = ["ETF_KR", "ETF_US"]` → `PER_TICKER_GROUPS = ["KOSPI200", "SP500", "ETF_KR", "ETF_US"]`
+  - `etf_name_map` (ETF만) → `name_map` (전체 instruments. ticker → name)
+  - `opt_ctx["etf_name_map"]` → backward compat alias + `opt_ctx["name_map"]`
+  - `_load_optimize_results()` 주석도 "ETF 종목별" → "전체 그룹 종목별" 수정
+- **수정** (`templates/optimize.html`)
+  - `var PER_TICKER_GROUPS = ['KOSPI200', 'SP500', 'ETF_KR', 'ETF_US']` 추가
+  - `isPerTickerGroup()` 함수 추가 (`isEtfGroup()` 는 backward compat으로 유지)
+  - `<section x-show="isEtfGroup()">` → `x-show="isPerTickerGroup()"`
+  - 섹션 제목 "ETF 종목별 최적 파라미터" → "종목별 최적 파라미터"
+  - 설명 문구에서 "ETF" 특정 제거 → 그룹 공통 문구로 변경
+  - `ETF_NAME_MAP[curTicker]` → `NAME_MAP[curTicker]` (전체 종목 이름 lookup)
+  - `var NAME_MAP = ETF_NAME_MAP` alias 추가 (template backward compat)
+- **데이터 경로** : `output/optimize/per_ticker/{group}/{ticker}.csv` + `_summary.json` (4개 그룹 모두)
+- **규모**: KOSPI200 ~200종목 + SP500 ~500종목 → `make v2-optimize` 실행 시 ~700개 per-ticker CSV 추가 생성
+- **검증** : `candle dashboard --debug` 정상 완료 (pages=9, 0 traceback)

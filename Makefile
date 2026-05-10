@@ -116,7 +116,7 @@ clean:
 
 v2-universe:
 	set -o pipefail; uv run candle universe --market all $(DEBUG) | tee v2-universe.log
-	uv run python -u gmail_sender.py --subject="[candle][v2] v2-universe.log $$(date +%Y-%m-%d)" --body-file="./v2-universe.log" --only-me --sendmail "$(SENDMAIL)"
+	uv run python -u gmail_sender.py --subject="[candle][v2] $$(date +%Y-%m-%d) v2-universe.log" --body-file="./v2-universe.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-universe-small:
 	set -o pipefail; uv run candle universe --small $(DEBUG) | tee v2-universe-small.log
@@ -126,11 +126,11 @@ v2-fetch:
 
 v2-fetch-full:
 	set -o pipefail; uv run candle fetch --market all --from 2000-01-01 --workers 4 --timeout 30 $(DEBUG) | tee v2-fetch-full.log
-	uv run python -u gmail_sender.py --subject="[candle][v2] v2-fetch-full.log $$(date +%Y-%m-%d)" --body-file="./v2-fetch-full.log" --only-me --sendmail "$(SENDMAIL)"
+	uv run python -u gmail_sender.py --subject="[candle][v2] $$(date +%Y-%m-%d) v2-fetch-full.log" --body-file="./v2-fetch-full.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-analyze:
 	set -o pipefail; uv run candle analyze --market all $(DEBUG) | tee v2-analyze.log
-	uv run python -u gmail_sender.py --subject="[candle][v2] v2-analyze.log $$(date +%Y-%m-%d)" --body-file="./v2-analyze.log" --only-me --sendmail "$(SENDMAIL)"
+	uv run python -u gmail_sender.py --subject="[candle][v2] $$(date +%Y-%m-%d) v2-analyze.log" --body-file="./v2-analyze.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-analyze-refresh:
 	set -o pipefail; uv run candle analyze --market all --refresh $(DEBUG) | tee v2-analyze-refresh.log
@@ -181,28 +181,28 @@ v2-backtest-compare-2000-2015:
 # ── 병렬 실행 (v2-all 에서 사용) ───────────────────────────────────────────────
 v2-backtest:
 	set -o pipefail; $(MAKE) -j v2-backtest-compare-full v2-backtest-compare-5y v2-backtest-compare-2010-2020 v2-backtest-compare-2000-2015 DEBUG="$(DEBUG)" | tee v2-backtest.log
-	uv run python -u gmail_sender.py --subject="[candle][v2] v2-backtest.log $$(date +%Y-%m-%d)" --body-file="./v2-backtest.log" --only-me --sendmail "$(SENDMAIL)"
+	uv run python -u gmail_sender.py --subject="[candle][v2] $$(date +%Y-%m-%d) v2-backtest.log" --body-file="./v2-backtest.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-simulate:
 	set -o pipefail; uv run candle simulate $(DEBUG) | tee v2-simulate.log
-	uv run python -u gmail_sender.py --subject="[candle][v2] v2-simulate.log $$(date +%Y-%m-%d)" --body-file="./v2-simulate.log" --only-me --sendmail "$(SENDMAIL)"
+	uv run python -u gmail_sender.py --subject="[candle][v2] $$(date +%Y-%m-%d) v2-simulate.log" --body-file="./v2-simulate.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-simulate-noai:
 	set -o pipefail; uv run candle simulate --no-ai $(DEBUG) | tee v2-simulate-noai.log
 
 v2-dashboard:
 	set -o pipefail; uv run candle dashboard $(DEBUG) | tee v2-dashboard.log
-	uv run python -u gmail_sender.py --subject="[candle][v2] v2-dashboard.log $$(date +%Y-%m-%d)" --body-file="./v2-dashboard.log" --only-me --sendmail "$(SENDMAIL)"
-	uv run python -u gmail_sender.py \
-		--sendmail "$(SENDMAIL)" \
-		--subject="[candle][v2] 투자 리포트 $$(date +%Y-%m-%d)" \
-		--decisions-json="./dashboard_site/data/decisions.json" --only-me
+	uv run python -u gmail_sender.py --subject="[candle][v2] $$(date +%Y-%m-%d) v2-dashboard.log" --body-file="./v2-dashboard.log" --only-me --sendmail "$(SENDMAIL)"
 
 # ── 전체 파이프라인 ────────────────────────────────────────────────────────────
 # SENDMAIL=YES 설정 시 완료 후 전체 수신자에게 메일 발송
 # 예) make v2-all SENDMAIL=YES
 #     make v2-all DEBUG=--debug SENDMAIL=YES
 v2-all: v2-universe v2-fetch-full v2-analyze v2-backtest v2-simulate v2-dashboard
+	uv run python -u gmail_sender.py \
+		--sendmail "$(SENDMAIL)" \
+		--subject="[candle][v2] $$(date +%Y-%m-%d) 투자 리포트" \
+		--decisions-json="./dashboard_site/data/decisions.json"
 
 
 # ── optimize (v2-all 에 미포함 — 수동 실행) ───────────────────────────────────
@@ -218,7 +218,8 @@ v2-optimize:
 		--minus-min 4 --minus-max 10 --minus-step 2 \
 		--top 30 \
 		$(DEBUG) | tee v2-optimize.log
-	uv run python -u gmail_sender.py --subject="[candle][v2] v2-optimize.log $$(date +%Y-%m-%d)" --body-file="./v2-optimize.log" --only-me --sendmail "$(SENDMAIL)"
+	uv run python -u gmail_sender.py --subject="[candle][v2] $$(date +%Y-%m-%d) v2-optimize.log" --body-file="./v2-optimize.log" --only-me --sendmail "$(SENDMAIL)"
+	make v2-dashboard
 
 # ── smoke (소규모 universe 빠른 검증) ─────────────────────────────────────────
 v2-smoke:

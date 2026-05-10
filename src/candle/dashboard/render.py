@@ -64,7 +64,7 @@ def render(cfg: config.Config, on_date: date,
     tprint(f"[dashboard] 의사결정 로딩 (on_date={on_date.isoformat()})...", flush=True)
     t0 = time.perf_counter()
     rank_map = _load_rank_snapshot(cfg)
-    decisions, counts, type_counts = _load_decisions(cfg, on_date, rank_map=rank_map)
+    decisions, counts, type_counts, actual_date = _load_decisions(cfg, on_date, rank_map=rank_map)
     tprint(f"[dashboard] 의사결정 완료 — {len(decisions)}건 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     tprint(f"[dashboard] 변곡점 lookup (on_date={on_date.isoformat()})...", flush=True)
@@ -103,7 +103,7 @@ def render(cfg: config.Config, on_date: date,
     }
 
     common_ctx = dict(
-        as_of=on_date.isoformat(),
+        as_of=actual_date,
         generated_at=datetime.now().isoformat(timespec="seconds"),
         kpi={
             "tickers": (0 if inst.empty else len(inst)),
@@ -174,11 +174,18 @@ def render(cfg: config.Config, on_date: date,
     tprint("[dashboard] optimize.html 렌더...", flush=True)
     t0 = time.perf_counter()
     opt_data = _load_optimize_results(cfg)
+    # 전체 종목 이름 lookup (ticker → name)
+    name_map: dict[str, str] = {}
+    if not inst.empty:
+        for _, r in inst.iterrows():
+            name_map[str(r["ticker"])] = str(r["name"])
     opt_tpl = env.get_template("optimize.html")
     opt_ctx = dict(common_ctx)
     opt_ctx["opt_data"] = opt_data
     opt_ctx["opt_groups"] = _OPT_GROUPS
     opt_ctx["opt_labels"] = _OPT_LABELS
+    opt_ctx["etf_name_map"] = name_map  # backward compat alias
+    opt_ctx["name_map"] = name_map
     (out_dir / "optimize.html").write_text(opt_tpl.render(**opt_ctx), encoding="utf-8")
     n_all = len(opt_data.get("all", []))
     tprint(f"[dashboard] optimize.html 완료 — 전체 {n_all}개 조합 ({time.perf_counter()-t0:.1f}s)", flush=True)
@@ -239,13 +246,18 @@ def _load_compare_all(cfg: config.Config) -> dict[str, list[dict]]:
 
 
 def _load_decisions(cfg: config.Config, on_date: date,
-                    rank_map: dict[str, int] | None = None) -> tuple[list[dict], dict]:
+                    rank_map: dict[str, int] | None = None) -> tuple[list[dict], dict, dict, str]:
     df = csv_io.read(engine.decisions_path(cfg))
     if df.empty:
-        return [], {"rule": 0, "ai": 0, "manual": 0}
+        return [], {"rule": 0, "ai": 0, "manual": 0}, {}, on_date.isoformat()
     today = df[df["date"] == on_date.isoformat()].copy()
+    actual_date = on_date.isoformat()
     if today.empty:
-        return [], {"rule": 0, "ai": 0, "manual": 0}
+        # 오늘 데이터가 없으면 (주말/공휴일/미실행) 가장 최근 날짜로 fallback
+        actual_date = str(df["date"].max())
+        today = df[df["date"] == actual_date].copy()
+    if today.empty:
+        return [], {"rule": 0, "ai": 0, "manual": 0}, {}, actual_date
 
     # type3 (적립식) rule 신호는 표시에서 제외
     today = today[today["source"].astype(str) != "rule:type3"].copy()
@@ -301,7 +313,7 @@ def _load_decisions(cfg: config.Config, on_date: date,
             "reason": str(r.get("reason", "")) if not pd.isna(r.get("reason")) else "",
             "tab": str(r["tab"]),
         })
-    return rows, counts, type_counts
+    return rows, counts, type_counts, actual_date
 
 
 def _load_inflections(cfg: config.Config, on_date: date, debug: bool = False) -> list[dict]:
@@ -561,6 +573,7 @@ def _load_optimize_results(cfg: config.Config) -> dict[str, list[dict]]:
             pass
 
     result: dict[str, list[dict]] = {"_meta": [meta] if meta else []}
+    PER_TICKER_GROUPS = ["KOSPI200", "SP500", "ETF_KR", "ETF_US"]
 
     for g in _OPT_GROUPS:
         p = opt_dir / f"streak_grid_{g}.csv"
@@ -582,6 +595,43 @@ def _load_optimize_results(cfg: config.Config) -> dict[str, list[dict]]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
         result[g] = df.fillna("").to_dict(orient="records")
+
+    # ── 전체 그룹 종목별 per-ticker 데이터 로드 ──────────────────────────────
+    import json as _j
+    for g in PER_TICKER_GROUPS:
+        per_dir = opt_dir / "per_ticker" / g
+        key_tickers = f"{g}_tickers"
+        key_summary = f"{g}_summary"
+        if not per_dir.exists():
+            result[key_tickers] = {}
+            result[key_summary] = {}
+            continue
+        # 요약 (ticker → 최적 파라미터)
+        summary_path = per_dir / "_summary.json"
+        result[key_summary] = {}
+        if summary_path.exists():
+            try:
+                result[key_summary] = _j.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        # 종목별 전체 결과 rows
+        tickers_data: dict[str, list[dict]] = {}
+        for csv_p in sorted(per_dir.glob("*.csv")):
+            if csv_p.name.startswith("_"):
+                continue
+            tk = csv_p.stem
+            try:
+                df = pd.read_csv(csv_p)
+                for col in ["avg_return", "median_return", "hit_rate"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce")
+                for col in ["plus_days", "minus_days", "n_positive", "n_total"]:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
+                tickers_data[tk] = df.fillna("").to_dict(orient="records")
+            except Exception as e:
+                log.warning(f"per_ticker/{g}/{csv_p.name} 읽기 실패: {e}")
+        result[key_tickers] = tickers_data
     return result
 
 

@@ -1,13 +1,13 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-10 (4차)
+date: 2026-05-11 (6차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-10 현재 Phase 1~6 전체 구현 완료.**
+> **2026-05-11 현재 Phase 1~6 전체 구현 완료. 전체 4개 그룹 종목별 per-ticker 최적화 지원.**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 
@@ -86,10 +86,11 @@ candle/
 │   │   ├── ai_advisor.py        # Claude Opus 4.7 + prompt caching
 │   │   └── manual.py            # manual_input.csv 로드
 │   └── dashboard/
-│       ├── render.py            # Jinja2 렌더 · _load_docs() · _load_rank_snapshot()
+│       ├── render.py            # Jinja2 렌더 · _load_docs() · _load_rank_snapshot() · name_map(전체 종목)
 │       └── templates/
 │           ├── index.html · _nav.html · _type_legend.html
 │           ├── group_returns.html · compare.html · decisions.html
+│           ├── optimize.html    # 모든 그룹 탭에서 종목별 히트맵+조합 표시 (isPerTickerGroup)
 │           └── docs.html        # 문서 뷰어 (marked.js + highlight.js)
 ├── data/                        # CSV 저장소 (gitignore)
 │   ├── instruments.csv
@@ -108,7 +109,15 @@ candle/
     │                  /best_strategy.csv
     │                  /evaluation_volume.csv
     ├── simulate/decisions.csv + trades.csv
-    └── ai_cache/{date}/{ticker}.json
+    ├── ai_cache/{date}/{ticker}.json
+    └── optimize/
+        ├── streak_grid_{all|KOSPI200|SP500|ETF_KR|ETF_US}.csv
+        ├── streak_grid_meta.json
+        └── per_ticker/
+            ├── KOSPI200/{ticker}.csv + _summary.json
+            ├── SP500/{ticker}.csv + _summary.json
+            ├── ETF_KR/{ticker}.csv + _summary.json
+            └── ETF_US/{ticker}.csv + _summary.json
 ```
 
 ### 1.2 CLI 전체 옵션 (현행)
@@ -309,6 +318,10 @@ output/backtest/2010-2020/ ← --label 2010-2020 (고정 기간)
 - **`--all-groups`**: 전체(all) + KOSPI200/SP500/ETF_KR/ETF_US 5개 그룹 **동시 실행** (ticker 1회 로딩).
   - 출력: `output/optimize/streak_grid_{all|KOSPI200|SP500|ETF_KR|ETF_US}.csv`
   - 메타: `output/optimize/streak_grid_meta.json` (실행일시, 데이터 구간, 파라미터 범위)
+- **ETF per-ticker**: ETF_KR/ETF_US 그룹은 그룹 전체 외에 **종목별 독립 grid search** 추가 실행.
+  - ETF_KR과 ETF_US 두 그룹을 `ThreadPoolExecutor(max_workers=2)`로 **동시** 처리.
+  - 각 그룹 내 종목별 `_grid_search`도 `ThreadPoolExecutor`로 병렬 처리 (`workers` 파라미터).
+  - 출력: `output/optimize/per_ticker/{ETF_KR|ETF_US}/{ticker}.csv` + `_summary.json`
 
 ```
 make v2-optimize            # --all-groups: 5개 그룹 결과 동시 생성
@@ -343,11 +356,11 @@ type2_1b:
   - `_load_rank_snapshot()`: `data/{kospi,sp500}_daily_rank.csv` 의 최신 row → ticker→rank 매핑 (674개). 데이터 없으면 빈 dict.
   - `_build_period_table()`: backtest label × ticker → best_return 테이블. `rank_in_group` 포함. 그룹별로 분리.
   - `_load_inflections()`: 오늘 변곡점 발생 종목 (전체 ticker 스캔, ~30초)
-  - `_load_decisions()`: type3(적립식) 제외, 종목명/그룹명 추가, type별 건수 계산. `rank_map` 전달 받아 비ETF 그룹에 `rank_in_group` 포함.
+  - `_load_decisions()`: type3(적립식) 제외, 종목명/그룹명 추가, type별 건수 계산. `rank_map` 전달 받아 비ETF 그룹에 `rank_in_group` 포함. **`on_date`에 데이터 없으면 CSV 내 최신 날짜로 자동 fallback** (주말/공휴일 대응). 반환값 4-tuple: `(rows, counts, type_counts, actual_date)`.
   - `_load_docs()`: `claude/` 디렉터리 `.md` 파일 읽기. `_DOC_LABELS`(친화적 이름) + `_DOC_ORDER`(표시 순서) 로 정렬.
   - `io_report.tprint()`: 모든 일반 출력에 `2026-05-10 19:07:07,928` 형식 타임스탬프 자동 부여.
   - 진행 출력: 각 단계 `[dashboard] ... 완료 (Xs)` 형식
-- **8개 파일** (2026-05-10 개선):
+- **8개 파일** (2026-05-10 개선, 2026-05-11 optimize 확장):
 
 | 파일 | 내용 |
 |------|------|
@@ -359,7 +372,7 @@ type2_1b:
 | `compare.html` | 전략×그룹별 요약 (period 탭, TOTAL 행 포함) |
 | `decisions.html` | 오늘의 의사결정 (RANK 컬럼, rule/AI/manual + type 필터) |
 | `docs.html` | 문서 뷰어 (claude/ *.md 자동 수집, Markdown/Raw 토글) |
-| `optimize.html` | type2 파라미터 최적화 결과 (그룹 탭 + 히트맵 + 실행 메타) |
+| `optimize.html` | type2 파라미터 최적화 결과 (그룹 탭 + 히트맵 + 실행 메타 + ETF 종목별) |
 
 - **공통 템플릿**: `_nav.html` · `_type_legend.html` · `group_returns.html` · `_download.html`
 - **favicon**: 모든 페이지 🕯️ SVG data URI inline
@@ -374,6 +387,10 @@ type2_1b:
   - 그룹 탭: 전체(718종목) / KOSPI200 / SP500 / ETF_KR / ETF_US
   - 실행 메타 카드: 실행일시 · 데이터 구간 · 종목수 · 조합수
   - 히트맵 (plus_days × minus_days, 색상으로 avg_return 표시)
+  - **ETF_KR/ETF_US 탭 선택 시 종목별 섹션 추가 표시**:
+    - 전체 종목 요약 테이블 (ticker, 이름, 최적 plus/minus, avg_return, hit_rate)
+    - 종목 클릭 → 개별 히트맵 + 전체 조합 결과 테이블 (정렬·CSV 다운로드)
+    - "← 목록으로" 버튼으로 복귀. 그룹 탭 전환 시 선택 ticker 초기화
 - **CSV 다운로드** (`_download.html`): compare / decisions / group_returns / optimize 모두 지원
 
 ### ✅ Phase 6 — 자동화
@@ -588,4 +605,4 @@ dashboard_site/data/
 
 ---
 
-부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-10 (4차).
+부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-11 (5차).

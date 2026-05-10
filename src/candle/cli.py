@@ -196,9 +196,11 @@ def optimize_streak(
     minus_min:  int = typer.Option(4,  "--minus-min", help="minus_days 최솟값 (기본 4)"),
     minus_max:  int = typer.Option(10, "--minus-max", help="minus_days 최댓값 (기본 10)"),
     minus_step: int = typer.Option(2,  "--minus-step",help="minus_days 간격 (기본 2)"),
-    workers:    int = typer.Option(4,  "--workers",   help="ticker 로딩 병렬 worker 수 (기본 4)"),
-    top_n:      int = typer.Option(30, "--top",       help="상위 N개 출력 (기본 30)"),
+    workers:    int  = typer.Option(4,  "--workers",   help="ticker 로딩 병렬 worker 수 (기본 4)"),
+    top_n:      int  = typer.Option(30, "--top",       help="상위 N개 출력 (기본 30)"),
     output:     Optional[str] = typer.Option(None, "--output", help="단일 결과 저장 CSV 경로 (--all-groups 미사용 시)"),
+    debug:      bool = typer.Option(False, "--debug",
+                                    help="ticker별 로딩 결과 + 조합별 즉시 수익률 출력"),
 ):
     """plus_days / minus_days 그리드 서치 — type2_1b / type2_2b 최적 연속일수 탐색.
 
@@ -206,6 +208,7 @@ def optimize_streak(
     718개 전 종목에 대한 시뮬레이션을 수행, avg_return 이 가장 높은 조합을 찾습니다.
 
     --all-groups: 전체(all) + KOSPI200 / SP500 / ETF_KR / ETF_US 5개 결과 파일 생성
+    --debug: ticker별 로딩 현황 + (plus, minus) 조합별 결과를 즉시 출력
     """
     cfg = config.load()
     from .optimize.streak_grid import run as sg_run, run_all_groups
@@ -215,7 +218,7 @@ def optimize_streak(
         start=_maybe_date(start), end=_maybe_date(end),
         plus_min=plus_min, plus_max=plus_max, plus_step=plus_step,
         minus_min=minus_min, minus_max=minus_max, minus_step=minus_step,
-        workers=workers, top_n=top_n,
+        workers=workers, top_n=top_n, debug=debug,
     )
 
     if all_groups:
