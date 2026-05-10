@@ -312,7 +312,7 @@ def main() -> None:
     df = pd.concat([df.reset_index(drop=True), stats_df], axis=1)
     df["원인"] = df.apply(build_reason, axis=1)
 
-    for group_name in ["KOSPI 200", "S&P500", "ETF"]:
+    for group_name in ["KOSPI 200", "S&P500", "KR ETF", "US ETF"]:
         analyze_group(df, group_name, args.top_n)
 
 

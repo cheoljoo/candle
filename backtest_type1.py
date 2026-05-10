@@ -24,15 +24,19 @@ import pandas as pd
 
 from analyze import (
     DATA_DIR,
-    ETF_SYMBOLS,
-    STOCKS_DIR,
-    US_STOCKS_DIR,
     format_marcap,
     load_kospi_list,
     load_sp500_list,
     print_table,
 )
-from fetch_data import compute_ma10m
+from fetch_data import (
+    compute_ma10m,
+    fetch_us_marketcap_table,
+    STOCKS_KR_DIR as STOCKS_DIR,
+    STOCKS_US_DIR as US_STOCKS_DIR,
+    KR_ETFS,
+    US_ETFS
+)
 
 SHARES_PER_TRADE = 10
 
@@ -57,6 +61,7 @@ def load_rank_table(group_name: str) -> pd.DataFrame | None:
         _rank_cache[group_name] = None
         return None
     df = pd.read_csv(path, index_col=0, parse_dates=True)
+    df.index = pd.to_datetime(df.index, utc=True).tz_localize(None)
     _rank_cache[group_name] = df
     return df
 
@@ -159,6 +164,7 @@ def load_price_frame(path: Path) -> pd.DataFrame | None:
         return None
 
     df = pd.read_csv(path, index_col=0, parse_dates=True)
+    df.index = pd.to_datetime(df.index, utc=True).tz_localize(None)
     if df.empty or "Close" not in df.columns:
         return None
 
@@ -174,7 +180,13 @@ def load_price_frame(path: Path) -> pd.DataFrame | None:
         else pd.Series(index=df.index, dtype="float64")
     )
 
-    price_df = pd.DataFrame({"Close": close, "Volume": volume, "MA10M": ma10m}).dropna(subset=["Close"])
+    price_df = pd.DataFrame({"Close": close, "Volume": volume, "MA10M": ma10m})
+    if "Shares" in df.columns:
+        price_df["Shares"] = pd.to_numeric(df["Shares"], errors="coerce")
+    if "Marcap" in df.columns:
+        price_df["Marcap"] = pd.to_numeric(df["Marcap"], errors="coerce")
+        
+    price_df = price_df.dropna(subset=["Close"])
     if price_df.empty:
         return None
 
@@ -306,44 +318,57 @@ def simulate_type1(df: pd.DataFrame, window: BacktestWindow) -> dict:
 
 
 def build_universe() -> list[tuple[str, list[dict]]]:
-    kospi_df = load_kospi_list()
-    sp500_df = load_sp500_list()
+    kospi_list = load_kospi_list().set_index('Code')
+    sp500_list = load_sp500_list().set_index('Symbol')
+    us_marketcap = fetch_us_marketcap_table().set_index('Symbol')
 
     return [
         (
             "KOSPI 200",
             [
                 {
-                    "ticker": str(row["Code"]),
-                    "name": str(row["Name"]),
+                    "ticker": f.stem,
+                    "name": str(kospi_list.loc[f.stem, "Name"]) if f.stem in kospi_list.index else f.stem,
                     "stocks_dir": STOCKS_DIR,
-                    "marcap": format_marcap(row.get("Marcap", 0)),
+                    "marcap": format_marcap(kospi_list.loc[f.stem].get("Marcap", 0)) if f.stem in kospi_list.index else "-",
                 }
-                for _, row in kospi_df.head(200).iterrows()
+                for f in STOCKS_DIR.glob("*.csv") if f.stem not in KR_ETFS
             ],
         ),
         (
             "S&P500",
             [
                 {
-                    "ticker": str(row["Symbol"]),
-                    "name": str(row["Name"]),
+                    "ticker": f.stem,
+                    "name": str(sp500_list.loc[f.stem, "Name"]) if f.stem in sp500_list.index else f.stem,
                     "stocks_dir": US_STOCKS_DIR,
-                    "marcap": "-",
+                    "marcap": format_marcap(us_marketcap.loc[f.stem, "marketcap"]) if f.stem in us_marketcap.index else "-",
                 }
-                for _, row in sp500_df.iterrows()
+                for f in US_STOCKS_DIR.glob("*.csv") if f.stem not in US_ETFS
             ],
         ),
         (
-            "ETF",
+            "KR ETF",
             [
                 {
                     "ticker": symbol,
-                    "name": symbol,
+                    "name": name,
+                    "stocks_dir": STOCKS_DIR,
+                    "marcap": "-",
+                }
+                for symbol, name in KR_ETFS.items()
+            ],
+        ),
+        (
+            "US ETF",
+            [
+                {
+                    "ticker": symbol,
+                    "name": name,
                     "stocks_dir": US_STOCKS_DIR,
                     "marcap": "-",
                 }
-                for symbol in ETF_SYMBOLS
+                for symbol, name in US_ETFS.items()
             ],
         ),
     ]

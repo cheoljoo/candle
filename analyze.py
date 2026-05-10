@@ -1,9 +1,10 @@
 """
 analyze.py
-fetch_data.py 로 수집된 데이터를 읽어 다음 세 그룹을 분석합니다.
-  - KOSPI 상위 200 종목
-  - S&P500 전 종목
-  - 주요 ETF (VOO, SPY, QQQ, SCHD, JEPI, SOXX, XLE)
+fetch_data.py 로 수집된 데이터를 읽어 다음 그룹을 분석합니다.
+  - KOSPI (stocks_kr 폴더 내 모든 파일)
+  - S&P500 (stocks_us 폴더 내 모든 파일)
+  - KR ETF (fetch_data.KR_ETFS 에 정의된 종목)
+  - US ETF (fetch_data.US_ETFS 에 정의된 종목)
 
 각 그룹 출력:
   1. [★ 변곡점 종목] – 최근 7거래일 내 이격률 부호가 바뀐 종목 (가장 중요)
@@ -16,12 +17,16 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
-DATA_DIR        = Path(__file__).parent / "data"
-STOCKS_DIR      = DATA_DIR / "stocks"
-US_STOCKS_DIR   = DATA_DIR / "stocks_us"
-KOSPI_LIST_FILE = DATA_DIR / "kospi_list.csv"
-SP500_LIST_FILE = DATA_DIR / "sp500_list.csv"
-ETF_SYMBOLS     = ['VOO', 'SPY', 'QQQ', 'SCHD', 'JEPI', 'SOXX', 'XLE']
+from fetch_data import (
+    DATA_DIR,
+    STOCKS_KR_DIR as STOCKS_DIR,
+    STOCKS_US_DIR as US_STOCKS_DIR,
+    KR_ETFS,
+    US_ETFS,
+    KOSPI_LIST_FILE,
+    SP500_LIST_FILE
+)
+
 LOOKBACK        = 7
 INFLECTION_FILE = DATA_DIR / "inflection_points.csv"  # 변곡점 종목 저장 파일
 
@@ -125,6 +130,7 @@ def analyze_stock(
         return None
 
     df = pd.read_csv(path, index_col=0, parse_dates=True)
+    df.index = pd.to_datetime(df.index, utc=True).tz_localize(None)
     if df is None or df.empty:
         return None
 
@@ -271,49 +277,84 @@ def print_section(title: str, records: list[dict]) -> pd.DataFrame:
 
 def main():
     today_str = datetime.now().strftime('%Y-%m-%d')
-    print(f"KOSPI 200 / S&P500 / ETF 분석을 시작합니다...")
+    print(f"Data-based Stock/ETF 분석을 시작합니다...")
     print(f"기준일: {today_str}")
 
-    # ── KOSPI ────────────────────────────────────────────────────
-    kospi_df = load_kospi_list()
-    kospi_records = []
-    for _, row in kospi_df.head(200).iterrows():
+    # Load metadata for names and marcap
+    kospi_list = load_kospi_list().set_index('Code')
+    sp500_list = load_sp500_list().set_index('Symbol')
+
+    # ── KR Stocks ────────────────────────────────────────────────
+    kr_records = []
+    for f in STOCKS_DIR.glob("*.csv"):
+        symbol = f.stem
+        if symbol in KR_ETFS: continue # Skip ETFs in this loop
+        
+        name = symbol
+        marcap = '-'
+        if symbol in kospi_list.index:
+            name = str(kospi_list.loc[symbol, 'Name'])
+            marcap = format_marcap(kospi_list.loc[symbol].get('Marcap', 0))
+            
         r = analyze_stock(
-            ticker=str(row['Code']),
-            name=str(row['Name']),
+            ticker=symbol,
+            name=name,
             stocks_dir=STOCKS_DIR,
-            marcap=format_marcap(row.get('Marcap', 0)),
+            marcap=marcap,
             min_price=3000,
             integer_price=True,
         )
         if r:
-            kospi_records.append(r)
-    kospi_inflect = print_section("KOSPI 200", kospi_records)
+            kr_records.append(r)
+    kr_inflect = print_section("KOSPI", kr_records)
 
-    # ── S&P500 ───────────────────────────────────────────────────
-    sp500_df = load_sp500_list()
-    sp500_records = []
-    for _, row in sp500_df.iterrows():
+    # ── US Stocks ────────────────────────────────────────────────
+    us_records = []
+    for f in US_STOCKS_DIR.glob("*.csv"):
+        symbol = f.stem
+        if symbol in US_ETFS: continue # Skip ETFs in this loop
+        
+        name = symbol
+        if symbol in sp500_list.index:
+            name = str(sp500_list.loc[symbol, 'Name'])
+            
         r = analyze_stock(
-            ticker=str(row['Symbol']),
-            name=str(row['Name']),
+            ticker=symbol,
+            name=name,
             stocks_dir=US_STOCKS_DIR,
         )
         if r:
-            sp500_records.append(r)
-    sp500_inflect = print_section("S&P500", sp500_records)
+            us_records.append(r)
+    us_inflect = print_section("S&P500", us_records)
 
-    # ── ETF ──────────────────────────────────────────────────────
-    etf_records = []
-    for sym in ETF_SYMBOLS:
-        r = analyze_stock(ticker=sym, name=sym, stocks_dir=US_STOCKS_DIR)
+    # ── KR ETF ───────────────────────────────────────────────────
+    kr_etf_records = []
+    for symbol, name in KR_ETFS.items():
+        r = analyze_stock(
+            ticker=symbol,
+            name=name,
+            stocks_dir=STOCKS_DIR,
+            integer_price=True,
+        )
         if r:
-            etf_records.append(r)
-    etf_inflect = print_section("ETF", etf_records)
+            kr_etf_records.append(r)
+    kr_etf_inflect = print_section("KR ETF", kr_etf_records)
+
+    # ── US ETF ───────────────────────────────────────────────────
+    us_etf_records = []
+    for symbol, name in US_ETFS.items():
+        r = analyze_stock(
+            ticker=symbol,
+            name=name,
+            stocks_dir=US_STOCKS_DIR,
+        )
+        if r:
+            us_etf_records.append(r)
+    us_etf_inflect = print_section("US ETF", us_etf_records)
 
     # ── 변곡점 종목 파일 저장 ─────────────────────────────────────
     all_inflect = pd.concat(
-        [df for df in [kospi_inflect, sp500_inflect, etf_inflect] if not df.empty],
+        [df for df in [kr_inflect, us_inflect, kr_etf_inflect, us_etf_inflect] if not df.empty],
         ignore_index=True,
     )
     if not all_inflect.empty:

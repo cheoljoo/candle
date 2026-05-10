@@ -249,3 +249,6 @@ uv run python backtest_compare.py --output_csv data/backtest_compare.csv
 - Python 3.13+
 - 패키지 관리: `uv`
 - 주요 라이브러리: `finance-datareader`, `pandas`
+
+# gemini update
+- [gemini update](./gemini_guide.md)

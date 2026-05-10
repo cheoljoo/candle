@@ -100,7 +100,7 @@ def build_rank_contexts() -> dict[str, RankContext]:
     us_marketcap = fetch_us_marketcap_table()
 
     for group_name, items in universe:
-        if group_name == "ETF":
+        if "ETF" in group_name:
             continue
 
         close_frame: dict[str, pd.Series] = {}
@@ -123,17 +123,26 @@ def build_rank_contexts() -> dict[str, RankContext]:
             df = load_price_frame(item["stocks_dir"] / f"{ticker}.csv")
             if df is None or df.empty:
                 continue
-            close_frame[ticker] = pd.to_numeric(df["Close"], errors="coerce")
+            close_frame[ticker] = df["Close"]
 
+            shares = None
             if group_name == "KOSPI 200":
                 shares = kospi_shares.get(ticker)
             else:
-                row = us_marketcap[us_marketcap["normalized_symbol"] == normalize_symbol(ticker)].head(1)
-                shares = None
-                if not row.empty:
-                    latest_close = float(close_frame[ticker].dropna().iloc[-1]) if not close_frame[ticker].dropna().empty else 0.0
-                    marketcap = float(row["marketcap"].iloc[0])
-                    shares = (marketcap / latest_close) if latest_close > 0 else None
+                # Try to get Shares from loaded df first
+                if "Shares" in df.columns:
+                    valid_shares = df["Shares"].dropna()
+                    if not valid_shares.empty:
+                        shares = float(valid_shares.iloc[-1])
+                
+                # Fallback to marketcap approximation
+                if shares is None or pd.isna(shares):
+                    row = us_marketcap[us_marketcap["normalized_symbol"] == normalize_symbol(ticker)].head(1)
+                    if not row.empty:
+                        latest_close = float(df["Close"].dropna().iloc[-1]) if not df["Close"].dropna().empty else 0.0
+                        marketcap = float(row["marketcap"].iloc[0])
+                        shares = (marketcap / latest_close) if latest_close > 0 else None
+            
             if shares and pd.notna(shares) and float(shares) > 0:
                 shares_outstanding[ticker] = float(shares)
 
@@ -475,7 +484,7 @@ def main() -> None:
     rank_contexts = build_rank_contexts()
     group_results: list[pd.DataFrame] = []
     for group_name, items in build_universe():
-        if group_name == "ETF":
+        if "ETF" in group_name:
             continue
         df = run_group_backtest(group_name, items, window, rank_contexts)
         group_results.append(df)
