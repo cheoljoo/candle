@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{ group_name }} — Candle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="border-b bg-white">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold">Candle Dashboard — {{ group_name }}</h1>
+      <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+    </div>
+  </div>
+</header>
+
+{% include "_nav.html" %}
+
+
+{% include "_type_legend.html" %}
+
+<main class="max-w-7xl mx-auto p-4 space-y-6"
+      x-data="{ open_ticker: null }">
+
+  <section class="bg-white rounded-lg shadow-sm p-4">
+    <h2 class="text-base font-semibold mb-1">{{ group_name }} — 종목별 기간 수익률 (전략 최고값)</h2>
+    <p class="text-xs text-slate-500 mb-3">
+      종목 클릭 → 기간 × 전략 상세 펼치기 ·
+      수익률 = 각 기간 내 5개 전략 중 최고 return_pct (%)
+    </p>
+    {% set show_rank = group_name in ['KOSPI200', 'SP500'] %}
+    {% if period_table %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm border-collapse">
+        <thead class="bg-slate-100 text-slate-600 text-xs">
+          <tr>
+            <th class="text-left px-3 py-2 sticky left-0 bg-slate-100">종목</th>
+            <th class="text-left px-3 py-2">그룹</th>
+            {% if show_rank %}
+            <th class="text-right px-3 py-2 whitespace-nowrap">RANK</th>
+            {% endif %}
+            {% for p in periods %}
+            <th class="text-right px-3 py-2 whitespace-nowrap">{{ p }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in period_table %}
+          {# 요약 행 #}
+          <tr class="border-t hover:bg-slate-50 cursor-pointer"
+              @click="open_ticker = (open_ticker === '{{ row.ticker }}') ? null : '{{ row.ticker }}'">
+            <td class="px-3 py-2 font-mono font-semibold sticky left-0 bg-white">
+              <span class="mr-1 text-slate-400 text-xs"
+                    x-text="open_ticker==='{{ row.ticker }}' ? '▼' : '▶'"></span>
+              {{ row.ticker }}
+              <span class="text-xs text-slate-400 font-normal ml-1">{{ row.name[:10] }}</span>
+            </td>
+            <td class="px-3 py-2 text-xs text-slate-500">{{ row.group_name }}</td>
+            {% if show_rank %}
+            <td class="px-3 py-2 text-right tabular-nums text-slate-600">
+              {% if row.rank_in_group is not none %}{{ row.rank_in_group }}{% else %}—{% endif %}
+            </td>
+            {% endif %}
+            {% for p in periods %}
+            {% set ret = row.period_returns.get(p, {}).get('best_return') %}
+            <td class="px-3 py-2 text-right tabular-nums font-semibold
+              {% if ret is not none %}{% if ret >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}{% else %}text-slate-300{% endif %}">
+              {% if ret is not none %}{{ "%.1f"|format(ret) }}%{% else %}—{% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {# 상세 행 (Alpine x-show) #}
+          <tr x-show="open_ticker === '{{ row.ticker }}'"
+              x-cloak class="bg-slate-50">
+            <td colspan="{{ periods|length + (3 if show_rank else 2) }}" class="px-6 py-3">
+              <table class="text-xs w-full border-collapse">
+                <thead>
+                  <tr class="text-slate-500">
+                    <th class="text-left py-1 pr-4">전략</th>
+                    {% for p in periods %}
+                    <th class="text-right py-1 px-3">{{ p }}</th>
+                    {% endfor %}
+                  </tr>
+                </thead>
+                <tbody>
+                  {% set all_types = [] %}
+                  {% for p in periods %}
+                    {% for t in row.period_returns.get(p, {}).get('detail', {}).keys() %}
+                      {% if t not in all_types %}{% set _ = all_types.append(t) %}{% endif %}
+                    {% endfor %}
+                  {% endfor %}
+                  {% for type_name in all_types|sort %}
+                  <tr class="border-t border-slate-200">
+                    <td class="py-1 pr-4 font-mono">{{ type_name }}</td>
+                    {% for p in periods %}
+                    {% set ret = row.period_returns.get(p, {}).get('detail', {}).get(type_name) %}
+                    <td class="py-1 px-3 text-right tabular-nums
+                      {% if ret is not none %}{% if ret >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}{% else %}text-slate-300{% endif %}">
+                      {% if ret is not none %}{{ "%.2f"|format(ret) }}%{% else %}—{% endif %}
+                    </td>
+                    {% endfor %}
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="text-sm text-slate-500">{{ group_name }} 데이터가 없습니다.</p>
+    {% endif %}
+  </section>
+
+  <p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+</main>
+
+</body>
+</html>

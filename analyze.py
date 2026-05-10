@@ -21,7 +21,7 @@ STOCKS_DIR      = DATA_DIR / "stocks"
 US_STOCKS_DIR   = DATA_DIR / "stocks_us"
 KOSPI_LIST_FILE = DATA_DIR / "kospi_list.csv"
 SP500_LIST_FILE = DATA_DIR / "sp500_list.csv"
-ETF_SYMBOLS     = ['VOO', 'SPY', 'QQQ', 'SCHD', 'JEPI', 'SOXX', 'XLE']
+ETF_SYMBOLS     = ['VOO', 'SPY', 'QQQ', 'SCHD', 'JEPI', 'SOXX', 'XLE', 'SOX']
 LOOKBACK        = 7
 INFLECTION_FILE = DATA_DIR / "inflection_points.csv"  # 변곡점 종목 저장 파일
 

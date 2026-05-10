@@ -1,0 +1,39 @@
+# req.md §1.1.2
+# 각 backtest type 의 파라미터.
+
+initial_capital:
+  KRW: 10000000     # 1천만원
+  USD: 1000
+
+type1_1:
+  description: "신호(-→+ 매수, +→- 매도) — 고정 10주"
+  qty: 10
+
+type1_2:
+  description: "신호 — 가용 현금 전액 매수 / 전량 매도"
+
+type2_1:
+  description: "plus_days/minus_days 카운터 (8/4) — 10주"
+  plus_days: 8
+  minus_days: 4
+  qty: 10
+
+type2_2:
+  description: "plus_days/minus_days 카운터 (8/4) — 전액/전량"
+  plus_days: 8
+  minus_days: 4
+
+type2_1b:
+  description: "plus_days/minus_days 카운터 (33/5) — 10주"
+  plus_days: 33
+  minus_days: 5
+  qty: 10
+
+type2_2b:
+  description: "plus_days/minus_days 카운터 (33/5) — 전액/전량"
+  plus_days: 33
+  minus_days: 5
+
+type3:
+  description: "신호 무시. 3개월(90일)마다 적립식 매수, 매도 없음."
+  interval_days: 90

@@ -1,0 +1,24 @@
+# 경로 / 로그 / 시장별 운영 시각
+
+paths:
+  data: data
+  output: output
+  ai_cache: output/ai_cache
+
+logging:
+  level: INFO
+  console: true
+
+schedule:
+  KR:
+    fetch:    "30 16 * * 1-5"   # KST 평일 16:30
+    analyze:  "40 16 * * 1-5"
+    backtest: "50 16 * * 1-5"
+  US:
+    fetch:    "0 6 * * 2-6"     # KST 평일+토 06:00 (전일 미국장 종가)
+    analyze:  "10 6 * * 2-6"
+    backtest: "20 6 * * 2-6"
+
+fetch:
+  history_start: "2000-01-01"   # 신규 ticker 첫 fetch 시작일 (이 날짜부터 today까지)
+  default_history_days: 9999    # fallback: history_start 미사용 시 (9999일 ≈ 27년)

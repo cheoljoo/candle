@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Candle Dashboard — {{ generated_at }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+    .pill { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium; }
+    .buy { @apply bg-emerald-100 text-emerald-800; }
+    .sell { @apply bg-rose-100 text-rose-800; }
+    .hold { @apply bg-slate-100 text-slate-700; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="border-b bg-white">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold">Candle Dashboard</h1>
+      <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+    </div>
+    <div class="flex gap-3 text-sm">
+      <div class="px-3 py-2 bg-slate-100 rounded">
+        <div class="text-slate-500">Tickers</div>
+        <div class="font-semibold">{{ kpi.tickers }}</div>
+      </div>
+      <div class="px-3 py-2 bg-slate-100 rounded">
+        <div class="text-slate-500">Decisions today</div>
+        <div class="font-semibold">{{ kpi.decisions_today }}</div>
+      </div>
+      <div class="px-3 py-2 bg-slate-100 rounded">
+        <div class="text-slate-500">Best strategy</div>
+        <div class="font-semibold">{{ kpi.best_strategy or "—" }}</div>
+      </div>
+    </div>
+  </div>
+</header>
+
+{% include "_nav.html" %}
+
+<main class="max-w-7xl mx-auto p-4 space-y-6">
+
+  {# ── 페이지 링크 카드 ────────────────────────────────── #}
+  <section class="bg-white rounded-lg shadow-sm p-4">
+    <h2 class="text-base font-semibold mb-3">페이지 모음</h2>
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+      <a href="kospi200.html" class="flex flex-col items-center justify-center p-4 rounded-lg border hover:bg-slate-50 transition">
+        <span class="text-lg font-bold text-slate-700">KOSPI200</span>
+        <span class="text-xs text-slate-400 mt-1">종목별 기간 수익률</span>
+      </a>
+      <a href="sp500.html" class="flex flex-col items-center justify-center p-4 rounded-lg border hover:bg-slate-50 transition">
+        <span class="text-lg font-bold text-slate-700">S&amp;P500</span>
+        <span class="text-xs text-slate-400 mt-1">종목별 기간 수익률</span>
+      </a>
+      <a href="etf_kr.html" class="flex flex-col items-center justify-center p-4 rounded-lg border hover:bg-slate-50 transition">
+        <span class="text-lg font-bold text-slate-700">ETF_KR</span>
+        <span class="text-xs text-slate-400 mt-1">종목별 기간 수익률</span>
+      </a>
+      <a href="etf_us.html" class="flex flex-col items-center justify-center p-4 rounded-lg border hover:bg-slate-50 transition">
+        <span class="text-lg font-bold text-slate-700">ETF_US</span>
+        <span class="text-xs text-slate-400 mt-1">종목별 기간 수익률</span>
+      </a>
+      <a href="compare.html" class="flex flex-col items-center justify-center p-4 rounded-lg border hover:bg-slate-50 transition">
+        <span class="text-lg font-bold text-slate-700">전략별 요약</span>
+        <span class="text-xs text-slate-400 mt-1">compare 기간 탭</span>
+      </a>
+      <a href="decisions.html" class="flex flex-col items-center justify-center p-4 rounded-lg border hover:bg-slate-50 transition">
+        <span class="text-lg font-bold text-slate-700">의사결정</span>
+        <span class="text-xs text-slate-400 mt-1">rule / AI / manual</span>
+      </a>
+    </div>
+  </section>
+
+  {# 변곡점 발생 종목 (오늘) — Action Required #}
+  <section class="bg-white rounded-lg shadow-sm p-4">
+    <h2 class="text-base font-semibold mb-3">변곡점 발생 (Action Required)</h2>
+    {% if inflections %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-100 text-slate-600">
+          <tr>
+            <th class="text-left px-3 py-2">Ticker</th>
+            <th class="text-left px-3 py-2">Group</th>
+            <th class="text-left px-3 py-2">Inflection</th>
+            <th class="text-right px-3 py-2">Close</th>
+            <th class="text-right px-3 py-2">MA10M</th>
+            <th class="text-right px-3 py-2">PER</th>
+            <th class="text-right px-3 py-2">PBR</th>
+            <th class="text-right px-3 py-2">Rank</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in inflections %}
+          <tr class="border-t">
+            <td class="px-3 py-2 font-mono">{{ r.ticker }}</td>
+            <td class="px-3 py-2 text-xs text-slate-500">{{ r.group_name }}</td>
+            <td class="px-3 py-2 font-medium">{{ r.inflection }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.2f}".format(r.close) if r.close is not none else "—" }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.2f}".format(r.ma10m) if r.ma10m is not none else "—" }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ "%.2f"|format(r.per) if r.per is not none else "—" }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ "%.2f"|format(r.pbr) if r.pbr is not none else "—" }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ r.rank_in_group if r.rank_in_group is not none else "—" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="text-sm text-slate-500">오늘 변곡점 발생 없음.</p>
+    {% endif %}
+  </section>
+
+  <p class="text-xs text-slate-400">
+    수동 입력은 <code>output/simulate/manual_input.csv</code> 를 편집한 뒤 <code>candle simulate</code> 재실행.
+  </p>
+</main>
+
+</body>
+</html>

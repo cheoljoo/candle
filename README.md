@@ -1,251 +1,281 @@
-# CANDLE
+# Candle — 추세추종 자동 투자 시스템 (v2)
 
-캔들차트 하나로 끝내는 추세추종 투자 — 책 내용 구현
+KOSPI200 · S&P500 · 주요 ETF 종목의 10월 이동평균 기반 추세추종 전략을  
+자동 수집 → 분석 → 백테스트 → AI 의사결정 → 대시보드까지 일괄 처리합니다.
 
-KOSPI 200 · S&P500 · 주요 ETF 종목의 10월 이동평균 대비 현재가 위치를 분석하고,  
-최근 7거래일 이격률 추이와 변곡점 종목을 자동으로 추출합니다.
+> **데이터 소스**: yfinance (KR/US 공용) + pykrx fallback (KR)  
+> **저장 포맷**: CSV only · **실행 환경**: Python 3.13+ · `uv`  
+> **대시보드**: http://psncs.iptime.org/stock_candle
 
-## 구조
+---
+
+## 빠른 시작
+
+```bash
+# 의존성 설치
+uv sync
+
+# 최초 1회: 전체 백필 (2000-01-01~)
+make v2-universe
+make v2-fetch-full
+make v2-analyze-refresh
+make v2-backtest-compare-full
+
+# 이후 매일: 증분 실행
+make v2-all
+
+# 디버그 출력 포함
+make v2-all DEBUG=--debug
+```
+
+---
+
+## 디렉터리 구조
 
 ```
 candle/
-├── fetch_data.py       # 일봉 종가 + 거래량 + MA10M + Marcap/Shares 수집, 시총 순위 파일 생성
-├── analyze.py          # 10월 이평 분석 + 7일 이격률 + 변곡점 출력
-├── backtest_type1.py   # MA10M 돌파/이탈 기반 type1 백테스트 (고정 10주)
-├── backtest_type1_2.py # type1-2: 가용 현금으로 최대 주수 매수 (현금 추적)
-├── backtest_type2.py   # 연속 +/- 확인 후 매매하는 type2 백테스트
-├── backtest_type4.py   # 시가총액 상위 조건 기반 type4 백테스트 (고정 10주)
-├── backtest_type4_2.py # type4-2: 시총 조건 + 가용 현금으로 최대 주수 매수
-├── backtest_compare.py # type1/type1_2/type2/type3/type4/type4_2 동일 초기자금 비교
-├── backtest_reason.py  # type1 결과의 상/하위 수익률 차이 원인 분석
-├── main.py             # fetch + analyze 통합 초기 버전 (참고용)
-├── Makefile
-└── data/               # .gitignore 등록 — 커밋하지 않음
-    ├── kospi_list.csv
-    ├── sp500_list.csv
-    ├── kospi_daily_rank.csv    # make fetch 시 생성: 날짜×티커 시총순위 (1=최대)
-    ├── sp500_daily_rank.csv    # make fetch 시 생성: 날짜×티커 시총순위
-    ├── stocks/{code}.csv       # Date, Close, Volume, MA10M, Shares, Marcap
-    └── stocks_us/{symbol}.csv  # Date, Close, Volume, MA10M, Shares, Marcap
+├── pyproject.toml               # 의존성: typer, pyyaml, pykrx, yfinance,
+│                                #   jinja2, anthropic, FinanceDataReader, requests
+├── Makefile                     # v2-* 타겟 (아래 참조)
+├── config/
+│   ├── universe.yml             # 그룹 정의 (KOSPI200/SP500/ETF_KR/ETF_US) + small_universe
+│   ├── strategies.yml           # 전략별 파라미터, 초기자본(KRW/USD)
+│   └── runtime.yml              # cron, 경로, history_start, fetch timeout
+├── src/candle/
+│   ├── cli.py                   # typer 진입점
+│   ├── universe/                # KOSPI200·SP500·ETF 종목 목록 갱신
+│   ├── fetch/                   # 일봉 증분 수집 (yfinance batch + pykrx fallback)
+│   ├── analyze/                 # 지표 계산 (MA10D/50D/10M, 변곡점, 시총순위) — 증분
+│   ├── backtest/                # 5종 전략 백테스트 — 증분
+│   ├── compare/                 # 전략×그룹 수익률 비교
+│   ├── simulate/                # 매일 rule+AI+manual 의사결정
+│   ├── optimize/                # plus_days/minus_days 그리드 서치
+│   ├── dashboard/               # Jinja2 → 정적 HTML (Tailwind + Alpine.js)
+│   ├── storage/                 # atomic CSV write, 증분 판단
+│   └── io_report.py             # announce() · tprint() (타임스탬프 출력)
+├── data/                        # CSV 저장소 (.gitignore)
+│   ├── instruments.csv          # 전체 종목 마스터
+│   ├── analyze_meta.csv         # analyze 증분 판단용
+│   ├── daily/{KR|US}/{ticker}.csv
+│   └── events/dividends.csv
+├── output/
+│   ├── backtest/{label}/{type}/  # label = full | 5y | 2010-2020 | 2000-2015
+│   ├── compare/{label}/
+│   ├── simulate/
+│   └── optimize/
+├── dashboard_site/              # 생성된 정적 HTML
+└── claude/                      # Claude 작업 문서
+    ├── claude-opus-4-7_guide.md # 현행 아키텍처 레퍼런스
+    ├── claude-work.md           # 작업 이력
+    └── req.md                   # 요구사항 원문
 ```
 
-## 사용법
+---
+
+## CLI 명령
 
 ```bash
-make fetch    # 데이터 수집 (당일 이미 수집 시 스킵, MA10M/Volume/Marcap 자동 보강, 시총 순위 파일 생성)
-make analyze  # 분석 실행
-make backtest-type1      # type1 백테스트 실행 (기본: 올해 01-01 ~ 오늘)
-make backtest-type1-2    # type1-2 백테스트 (현금 추적: 가용 현금으로 최대 주수 매수)
-make backtest-type2      # type2 백테스트 실행 (기본: plus/minus 연속일수 1)
-make backtest-type4      # 시가총액 상위 조건 기반 type4 백테스트
-make backtest-type4-2    # type4-2 백테스트 (시총 조건 + 현금 추적)
-make backtest-compare    # 동일 초기자금 기준 type1/type1_2/type2/type3/type4/type4_2 비교
-make backtest-type1-2020-2025  # 2020-01-01 ~ 2025-12-31 결과 저장
-make backtest-type1-2025-now   # 2025-01-01 ~ 오늘 결과 저장
-make all      # fetch → analyze 순서 실행
-make clean    # data/ 초기화
+candle universe   --market all [--small] [--debug]
+candle fetch      --market all [--from DATE] [--workers 4] [--timeout 10] [--debug]
+candle analyze    --market all [--refresh] [--debug]
+candle backtest   --market all [--from DATE] [--to DATE] [--label LABEL]
+                              [--types type1_1,...] [--debug]
+candle compare    [--from DATE] [--to DATE] [--label LABEL] [--debug]
+candle simulate   [--no-ai] [--debug]
+candle dashboard  [--out DIR] [--debug]
+candle optimize-streak --market all
+                       [--plus-min 4] [--plus-max 40] [--plus-step 2]
+                       [--minus-min 4] [--minus-max 10] [--minus-step 2]
+                       [--workers 4] [--top 30] [--output CSV경로]
 ```
+
+| 옵션 | 설명 |
+|------|------|
+| `fetch --from 2000-01-01` | 기존 파일 유무 관계없이 이 날짜부터 백필 |
+| `fetch --workers 4` | 병렬 worker 수 (기본 4) |
+| `fetch --timeout 10` | 종목당 HTTP timeout 초 (기본 10) |
+| `analyze --refresh` | meta 무시, 전체 행 강제 재계산 |
+| `backtest --label 5y` | 출력 경로를 날짜 대신 고정 label 로 지정 |
+| `optimize-streak --plus-step 2` | plus_days 탐색 간격 |
+
+---
+
+## Makefile 타겟
+
+### 전체 파이프라인
+
+```bash
+make v2-all                    # universe→fetch(full)→analyze→backtest→simulate→dashboard
+make v2-all DEBUG=--debug      # 위 + 단계별 상세 출력
+```
+
+### 단계별 실행
+
+```bash
+make v2-universe               # 종목 목록 갱신
+make v2-fetch                  # 오늘치 증분 fetch
+make v2-fetch-full             # 2000-01-01부터 전체 fetch
+make v2-analyze                # 새 row 자동 감지 증분 분석
+make v2-analyze-refresh        # 전체 재분석 (백필 후 1회 실행)
+make v2-backtest               # 기간별 backtest+compare 병렬 실행
+make v2-simulate               # 오늘 의사결정 (rule+AI+manual)
+make v2-simulate-noai          # AI 없이 rule+manual만
+make v2-dashboard              # HTML 대시보드 재생성
+```
+
+### Backtest 기간별 타겟 (병렬)
+
+```bash
+make v2-backtest               # full + 5y + 2010-2020 + 2000-2015 동시 실행
+make v2-backtest-compare-full        # 2000-01-01~ backtest+compare
+make v2-backtest-compare-5y          # 최근 5년 backtest+compare
+make v2-backtest-compare-2010-2020   # 2010~2020 고정 기간
+make v2-backtest-compare-2000-2015   # 2000~2015 고정 기간
+```
+
+### 파라미터 최적화 (v2-all 미포함 — 수동 실행)
+
+```bash
+make v2-optimize               # plus 4~40 step2 × minus 4~10 step2 = 76 조합
+make v2-optimize DEBUG=--debug
+# 결과: output/optimize/streak_grid.csv + 상위 30개 터미널 출력
+```
+
+### 기타
+
+```bash
+make v2-smoke                  # 소규모 universe로 전체 파이프라인 빠른 검증
+make v2-universe-small         # dev용 소규모 universe만 빌드
+```
+
+---
 
 ## 분석 대상
 
-| 그룹 | 종목 수 | 비고 |
-|------|---------|------|
-| KOSPI 200 | 200개 | 시가총액 상위 200 |
-| S&P500 | ~503개 | 전 종목 |
-| ETF | 7개 | VOO, SPY, QQQ, SCHD, JEPI, SOXX, XLE |
+| 그룹 | 종목 수 | 통화 | 소스 |
+|------|---------|------|------|
+| KOSPI200 | ~200개 | KRW | pykrx index 1028 → FDR fallback |
+| SP500 | ~503개 | USD | Wikipedia → FDR fallback |
+| ETF_KR | 11개 | KRW | config/universe.yml 고정 |
+| ETF_US | 7개 | USD | config/universe.yml 고정 (VOO·SPY·QQQ·SCHD·JEPI·SOXX·XLE) |
 
-## 분석 출력
+---
 
-각 그룹별로 다음 두 섹션 출력:
+## 백테스트 전략
 
-1. **★ 변곡점 종목** — 최근 7거래일 내 이격률 부호가 바뀐 종목 (`+→-` / `-→+`)  
-   컬럼: 티커 · 종목명 · 시가총액 · 방향 · 현재가 · **10월이평** · 현재이격률(%) · 날짜별이격률
-2. **전체 분석** — 종목별 현재가, 10월이평, 최근 7거래일 이격률(%)
+| 코드 | 설명 | 매수 | 매도 |
+|------|------|------|------|
+| `type1_1` | 변곡점 · 고정수량 | MA10M 교차 `-→+` 시 10주 | `+→-` 시 10주 |
+| `type1_2` | 변곡점 · 전액매수 | MA10M 교차 `-→+` 시 전액 | `+→-` 시 전량 |
+| `type2_1` | 연속일수(8/4) · 고정수량 | +8일 연속 → 10주 | -4일 연속 → 10주 |
+| `type2_2` | 연속일수(8/4) · 전액매수 | +8일 연속 → 전액 | -4일 연속 → 전량 |
+| `type2_1b` | 연속일수(33/5) · 고정수량 | +33일 연속 → 10주 | -5일 연속 → 10주 |
+| `type2_2b` | 연속일수(33/5) · 전액매수 | +33일 연속 → 전액 | -5일 연속 → 전량 |
+| `type3` | 적립식 90일 주기 | 90일마다 정액 입금 후 전액 매수 | 없음 |
 
-## Type1 백테스트
+> `type2_1b`/`type2_2b` 의 최적 `plus_days`/`minus_days` 탐색 → `make v2-optimize`
 
-`backtest_type1.py` 는 저장된 일봉 `Close`, `MA10M` 데이터를 이용해 아래 규칙으로 종목별 백테스트를 수행합니다.
+### 증분 처리 (backtest)
 
-- **매수:** 종가가 10월이평 아래(`-`)에서 위(`+`)로 바뀐 날 종가에 **10주 매수**
-- **매도:** 종가가 10월이평 위(`+`)에서 아래(`-`)로 바뀐 날 종가에 **보유 10주 전량 매도**
-- **체결 가정:** 신호가 나온 당일 종가를 매매 가격으로 사용
-- **미청산 평가:** 기간 종료 시 아직 매도 신호가 없으면 **`--to` 기준 평가 종가**로 평가손익 계산
-- **초기 상태:** 시작 시점 보유 주식 없음, 수수료/세금/슬리피지 미반영
+| 조건 | 처리 | 예: KR 208종목 |
+|------|------|----------------|
+| from/to 동일 | skip (기존 CSV 읽기만) | ~9s |
+| to 늘어남 | Portfolio 상태 복원 + 새 구간만 계산 | 수초 |
+| from 달라짐 / 첫 실행 | 전체 재계산 | ~72s |
 
-CLI 옵션:
+---
 
-- `--from`: 시작일 (`YYYY-MM-DD`, 기본값: **2년 전 `01-01`**)
-- `--to`: 종료일이자 **평가 기준일** (`YYYY-MM-DD`, 기본값: 오늘)
-- `--output_csv`: 결과 CSV 저장 경로 (기본값: `backtest_type1.csv`)
+## 데이터 모델 (주요 파일)
 
-예시:
+### 일봉 + 지표
+**`data/daily/{KR|US}/{ticker}.csv`**
+```
+date, open, high, low, close, volume, per, pbr, shares_out, market_cap,
+ma10d, ma50d, ma10m, ma10m_updown, inflection, rank_in_group
+```
+- `ma10m_updown`: `+` / `-`
+- `inflection`: `-→+` / `+→-` (교차일만, 나머지 빈값)
+- 신규 ticker: `history_start: "2000-01-01"` 부터 수집
+
+### Backtest 결과
+**`output/backtest/{label}/{type}/{ticker}.csv`**
+```
+type, date, ticker, side, price, qty, amount, holding_qty, holding_value, cash, return_pct
+```
+`{label}` = `full` | `5y` | `2010-2020` | `2000-2015`
+
+### Compare 결과
+**`output/compare/{label}/strategy_summary.csv`**
+```
+strategy, group, currency, tickers, 총자산, 현금, 보유주식수, 초기자본, 손익, 수익률, 매수횟수, 매도횟수
+```
+- `group`: `KOSPI200` / `SP500` / `ETF_KR` / `ETF_US` / `TOTAL (KRW)` / `TOTAL (USD)`
+
+### 의사결정
+**`output/simulate/decisions.csv`**
+```
+decision_id, date, ticker, source, action, qty, price, reason, raw_json_path
+```
+- `source`: `rule:{type}` | `ai` | `manual`
+
+---
+
+## 대시보드
+
+`make v2-dashboard` 로 `dashboard_site/` 에 정적 HTML 7개 생성.
+
+| 파일 | 내용 |
+|------|------|
+| `index.html` | KPI 카드 + 페이지 링크 + 오늘의 변곡점 |
+| `kospi200.html` | KOSPI200 종목 × 기간 수익률 (RANK 포함) |
+| `sp500.html` | S&P500 종목 × 기간 수익률 (RANK 포함) |
+| `etf_kr.html` | ETF_KR 종목 × 기간 수익률 |
+| `etf_us.html` | ETF_US 종목 × 기간 수익률 |
+| `compare.html` | 전략×그룹 수익률 비교 (period 탭) |
+| `decisions.html` | 오늘의 의사결정 (Rule/AI/Manual 탭 + type 필터) |
+
+---
+
+## AI Advisor
+
+`candle simulate` 실행 시 Claude Opus 4.7 API 호출 (선택적).
+
+- **입력**: 종목 메타 + 최근 60거래일 시세/MA/UPDOWN + PER + 시총순위 + 룰 신호
+- **출력**: `action: buy|sell|hold` + `confidence` + 근거/리스크 (JSON)
+- **비용 통제**: `runtime.yml` → `ai.daily_limit` (기본 50). `ANTHROPIC_API_KEY` 없으면 자동 skip.
+- **Prompt caching**: system + 종목 메타·60일 시세 → `cache_control: ephemeral`
+
+수동 의사결정: `output/simulate/manual_input.csv` 직접 편집 후 `candle simulate` 재실행.
+
+---
+
+## KRX 인증 (선택)
+
+pykrx 정확도 향상을 위해 KRX MDC 계정 설정 가능 (무료):
 
 ```bash
-uv run python backtest_type1.py
-uv run python backtest_type1.py --from 2020-01-01 --to 2025-12-31 --output_csv data/backtest_type1_2020_2025.csv
-uv run python backtest_type1.py --from 2025-01-01 --to 2026-04-11 --output_csv data/backtest_type1_2025_now.csv
+# https://data.krx.co.kr 회원가입 후
+export KRX_ID=your_id
+export KRX_PW=your_pw
 ```
 
-결과는 KOSPI 200 / S&P500 / ETF 각각에 대해 종목별로 아래 항목을 출력합니다.
+인증 없이도 FinanceDataReader fallback으로 정상 동작.
 
-- 평가종가 / 평가기준일 / 평가가격일
-- 매수횟수 / 매도횟수 / 보유주식수
-- 총매수금액
-- 사고판수익 / 사고판수익률(%) = **매수 후 매도까지 끝난 거래만** 대상으로 계산
-- 실현손익 / 미실현손익 / 총손익
-- 수익률(%) = `총손익 / 총매수금액 × 100`
-- 마지막매수일 / 마지막매도일
-- 각 그룹(KOSPI 200 / S&P500 / ETF) 마지막 줄에는 **금액 합계와 합계 기준 전체 수익률**이 추가됨
+---
 
-`Makefile` 에는 자주 쓰는 두 구간을 바로 생성하는 프리셋도 포함되어 있습니다.
+## 운영 주의사항
 
-- `make backtest-type1-2020-2025`
-- `make backtest-type1-2025-now`
+| 항목 | 내용 |
+|------|------|
+| 최초 백필 후 분석 | `make v2-fetch-full` → `make v2-analyze-refresh` (1회) |
+| 새 backtest 기간 추가 | Makefile에 `v2-backtest-compare-<label>` 타겟 추가 + `-j` 줄 포함 |
+| AI 비용 | `runtime.yml` `ai.daily_limit` 조정 |
+| yfinance 속도 | US batch는 80개씩 chunk × 3 병렬 실행. 전체 510종목 기준 ~46~145s |
+| 로그 확인 | 모든 일반 출력에 타임스탬프(`2026-05-10 19:07:07,928`) 포함 |
 
-## Type2 백테스트
-
-`backtest_type2.py` 는 type1과 같은 매매 규칙 구조를 사용하지만, 부호가 바뀐 당일 즉시 매매하지 않고
-**연속된 `+` / `-` 일수 확인 후** 매매합니다.
-
-- **매수:** `-→+` 전환 후 `--plus_days`일 연속 `+` 가 유지되면 10주 매수
-- **매도:** `+→-` 전환 후 `--minus_days`일 연속 `-` 가 유지되면 보유 10주 전량 매도
-- `--plus_days=1`, `--minus_days=1` 이면 type1과 동일한 규칙
-- 저장된 `Volume` 이 있으면 **평가거래량 / 최근 20일 평균 거래량 / 거래량배수**도 함께 출력
-
-CLI 옵션:
-
-- `--from`: 시작일 (`YYYY-MM-DD`, 기본값: **2년 전 `01-01`**)
-- `--to`: 종료일이자 **평가 기준일** (`YYYY-MM-DD`, 기본값: 오늘)
-- `--plus_days`: 매수 전 확인할 연속 `+` 일수 (기본값: `1`)
-- `--minus_days`: 매도 전 확인할 연속 `-` 일수 (기본값: `1`)
-- `--output_csv`: 결과 CSV 저장 경로 (기본값: `backtest_type2.csv`)
-
-예시:
-
-```bash
-uv run python backtest_type2.py
-uv run python backtest_type2.py --plus_days 3 --minus_days 2
-uv run python backtest_type2.py --from 2024-01-01 --to 2026-04-11 --plus_days 5 --minus_days 3 --output_csv data/backtest_type2.csv
-```
-
-추가 출력 컬럼:
-
-- `평가거래량`: 평가가격일의 거래량
-- `20일평균거래량`: 평가가격일까지 최근 20거래일 평균 거래량
-- `거래량배수`: `평가거래량 / 20일평균거래량`
-
-## Type1 결과 원인 분석
-
-`backtest_reason.py` 는 `backtest_type1.csv` 를 읽어 수익률 상위/하위 종목의 차이를 정리합니다.
-기간 주가상승률, 최대상승률, 종료 시점 낙폭, **첫 매수일**, **첫 매수일 거래량/직전 20일 평균 거래량 배수**, 매수/매도 횟수,
-사고판수익률, 미실현손익 비중을 함께 보고
-왜 성과 차이가 났는지 종목별 원인 문구로 출력합니다.
-
-```bash
-uv run python backtest_reason.py
-uv run python backtest_reason.py --input_csv backtest_type1.csv --top_n 5
-```
-
-## Type4 백테스트
-
-`backtest_type4.py` 는 **시가총액 상위 조건**을 매수 필터로 추가한 전략입니다.
-
-- **KOSPI:** 시가총액 상위 `30`
-- **S&P500:** 시가총액 상위 `100`
-- **매수:** `+` 신호이고, 현재 상위 종목이거나 그 시점의 추정 시가총액 순위가 상위 조건 안이면 **10주 매수**
-- **매도:** `-` 신호가 나오면 매도
-
-시점별 시가총액은 정확한 과거 시총 데이터가 아니라,
-**현재 시가총액 ÷ 현재가 = 유통주식수 근사치**를 구한 뒤
-이를 과거 종가에 곱해 근사 계산합니다.
-
-기본 기간은 `2020-01-01 ~ 오늘` 입니다.
-
-```bash
-uv run python backtest_type4.py
-uv run python backtest_type4.py --to 2026-04-12 --output_csv data/backtest_type4.csv
-```
-
-## 현금 추적 변형: Type1-2 / Type4-2
-
-`backtest_type1_2.py` / `backtest_type4_2.py` 는 **가용 현금**을 추적하는 현실적 전략 변형입니다.
-
-### 규칙
-
-- **초기 자본 자동 설정**: 첫 번째 매수 시 `SHARES_PER_TRADE × 매수가` 를 초기 자본으로 설정
-  - 이후 매수는 `floor(보유현금 / 매수가)` 주를 최대로 구매
-  - 손해를 본 경우 다음 매수 시 살 수 있는 주수가 줄어듦
-- **매도 시**: 매도 대금은 현금으로 돌아와 다음 매수에 사용됨
-- **주식 1주 단위** 매수
-- type1-2: type1과 동일한 신호 사용
-- type4-2: type4 시가총액 조건 + 현금 추적
-
-### 수익률 계산
-
-`수익률(%) = 총 손익 / 초기 자본 × 100`
-
-(type1/type4의 `총 매수금액` 기준이 아닌 **고정 초기 자본** 기준)
-
-추가 출력 컬럼: `현금잔고`, `초기자본`
-
-```bash
-uv run python backtest_type1_2.py
-uv run python backtest_type1_2.py --to 2026-04-12 --output_csv data/backtest_type1_2.csv
-uv run python backtest_type4_2.py
-uv run python backtest_type4_2.py --to 2026-04-12 --output_csv data/backtest_type4_2.csv
-```
-
-## 동일 초기자금 기준 type1 / type1_2 / type2 / type3 / type4 / type4_2 비교
-
-`backtest_compare.py` 는 종목마다 동일한 초기자금으로 아래 6가지 전략의 **현재 총자산**을 비교합니다.
-
-- **type1:** `-→+` 전환 시 고정 10주 매수, `+→-` 전환 시 전량 매도
-- **type1_2:** type1과 동일 신호이나 가용 현금으로 최대 주수 매수 (현금 추적)
-- **type2:** `plus_days/minus_days` 확인 후 가용 현금 전액 매수 / 전량 매도
-- **type3:** 신호와 무관하게 **3개월마다 동일 금액 적립식 매수 후 계속 보유**
-- **type4:** KOSPI 상위 30 / S&P500 상위 100 시가총액 조건을 만족하는 종목만 `- -> +` 전환에서 10주 매수
-- **type4_2:** type4 시가총액 조건 + 현금 추적 매수
-
-기본값:
-
-- 기간: `2020-01-01 ~ 오늘`
-- type2: `plus_days=33`, `minus_days=5`
-- 초기자금:
-  - `KOSPI 200`: `10,000,000 KRW`
-  - `S&P500`, `ETF`: `10,000 USD`
-- 단, **type4/type4_2만 별도 자금 배분**:
-  - `KOSPI 200`: `10,000,000 / 30`
-  - `S&P500`: `10,000 / 100`
-  - ETF: 미지원
-
-```bash
-uv run python backtest_compare.py
-uv run python backtest_compare.py --to 2026-04-12 --plus_days 33 --minus_days 5
-uv run python backtest_compare.py --output_csv data/backtest_compare.csv
-```
-
-주요 출력:
-
-- 각 전략별 `총자산`, `현금`, `보유주식수`, `손익`, `수익률(%)`, `매수횟수`, `매도횟수`
-- `type1_2_초기자본`, `type4_2_초기자본` (현금 추적 전략의 기준 자본)
-- `최고전략`
-- `최고전략_매수일_시총순위` (최고 전략의 마지막 매수일 당시 시가총액 순위)
-- 평가일 `거래량`, `20일평균거래량`, `거래량배수`
-
-참고:
-
-- `type4` 는 현재 KOSPI 200 / S&P500 에만 적용되고, ETF는 미지원입니다.
-
-## 분석 로직
-
-- **MA10M(10월이평)**: 월말 종가 기준 `rolling(10)` 이동평균 → 일봉 인덱스에 `forward-fill`
-- **이격률(%)** = `(현재가 − MA10M) / MA10M × 100`
-- MA10M과 Volume은 `fetch_data.py` 수집 시 CSV에 함께 저장 → `analyze.py`, `backtest_type2.py`에서 바로 사용
-- 주가 3,000원 미만 KOSPI 종목 제외
-- 한글 종목명 터미널 정렬: `unicodedata.east_asian_width()` 기반 전각문자 너비 보정
+---
 
 ## 환경
 
-- Python 3.13+
-- 패키지 관리: `uv`
-- 주요 라이브러리: `finance-datareader`, `pandas`
+- Python 3.13+  · 패키지 관리: `uv`
+- 주요 라이브러리: `yfinance`, `pykrx`, `FinanceDataReader`, `pandas`, `typer`, `jinja2`, `anthropic`

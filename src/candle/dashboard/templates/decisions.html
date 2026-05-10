@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>의사결정 — Candle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+    .pill { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium; }
+    .buy  { @apply bg-emerald-100 text-emerald-800; }
+    .sell { @apply bg-rose-100 text-rose-800; }
+    .hold { @apply bg-slate-100 text-slate-700; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="border-b bg-white">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold">Candle Dashboard — 오늘의 의사결정</h1>
+      <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+    </div>
+  </div>
+</header>
+
+{% include "_nav.html" %}
+
+<main class="max-w-7xl mx-auto p-4 space-y-4"
+      x-data="{ tab: 'rule', type_filter: 'all' }">
+
+  {# 전략 코드 설명 범례 #}
+  {% include "_type_legend.html" %}
+
+  {# 오늘의 의사결정 — type3(적립식) rule은 render.py에서 제외됨 #}
+  <section class="bg-white rounded-lg shadow-sm p-4">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-base font-semibold">오늘의 의사결정</h2>
+      <div class="text-xs text-slate-500">총 {{ decisions|length }} 건 (type3 적립식 제외)</div>
+    </div>
+
+    {# ── 탭: Rule / AI / Manual ── #}
+    <div class="border-b mb-3 flex gap-2 text-sm">
+      <button @click="tab='rule'; type_filter='all'"
+              :class="tab==='rule' ? 'border-b-2 border-slate-800 font-semibold' : 'text-slate-500'"
+              class="px-3 py-2">Rule ({{ counts.rule }})</button>
+      <button @click="tab='ai'; type_filter='all'"
+              :class="tab==='ai' ? 'border-b-2 border-slate-800 font-semibold' : 'text-slate-500'"
+              class="px-3 py-2">AI ({{ counts.ai }})</button>
+      <button @click="tab='manual'; type_filter='all'"
+              :class="tab==='manual' ? 'border-b-2 border-slate-800 font-semibold' : 'text-slate-500'"
+              class="px-3 py-2">Manual ({{ counts.manual }})</button>
+    </div>
+
+    {# ── type 필터 (Rule 탭일 때만 표시) ── #}
+    <div x-show="tab === 'rule'" class="flex flex-wrap gap-2 mb-3">
+      <span class="text-xs text-slate-400 self-center pr-1">전략 필터:</span>
+      <button @click="type_filter='all'"
+              :class="type_filter==='all' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-3 py-1 rounded-full text-xs font-medium transition">
+        전체 ({{ counts.rule }})
+      </button>
+      {% for tcode, tcnt in type_counts.items() | sort %}
+      <button @click="type_filter='{{ tcode }}'"
+              :class="type_filter==='{{ tcode }}' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+              class="px-3 py-1 rounded-full text-xs font-medium transition">
+        <span class="font-mono">{{ tcode }}</span>
+        {% if tcode in type_descriptions %}
+          <span class="opacity-70 ml-1">{{ type_descriptions[tcode][0] }}</span>
+        {% endif %}
+        ({{ tcnt }})
+      </button>
+      {% endfor %}
+    </div>
+
+    {# ── 테이블 ── #}
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-100 text-slate-600 text-xs">
+          <tr>
+            <th class="text-left px-3 py-2">그룹</th>
+            <th class="text-right px-3 py-2">RANK</th>
+            <th class="text-left px-3 py-2">Ticker</th>
+            <th class="text-left px-3 py-2">종목명</th>
+            <th class="text-left px-3 py-2">전략</th>
+            <th class="text-left px-3 py-2">Action</th>
+            <th class="text-right px-3 py-2">Qty</th>
+            <th class="text-right px-3 py-2">Price</th>
+            <th class="text-left px-3 py-2">Reason</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in decisions %}
+          {# rule 탭: tab + type_filter 모두 확인 / AI·manual: tab만 #}
+          <tr class="border-t hover:bg-slate-50"
+              x-show="tab === '{{ d.tab }}' && (tab !== 'rule' || type_filter === 'all' || '{{ d.source }}' === ('rule:' + type_filter))">
+            <td class="px-3 py-2 text-xs text-slate-400">{{ d.group_name }}</td>
+            <td class="px-3 py-2 text-right tabular-nums text-slate-500 text-xs">
+              {% if d.rank_in_group is not none %}{{ d.rank_in_group }}{% endif %}
+            </td>
+            <td class="px-3 py-2 font-mono text-slate-700">{{ d.ticker }}</td>
+            <td class="px-3 py-2 text-slate-600">{{ d.name }}</td>
+            <td class="px-3 py-2 text-xs">
+              {% if d.source.startswith("rule:") %}
+                {% set tcode = d.source[5:] %}
+                <span class="font-mono font-medium text-slate-700">{{ tcode }}</span>
+                {% if tcode in type_descriptions %}
+                  <br><span class="text-slate-400">{{ type_descriptions[tcode][0] }}</span>
+                {% endif %}
+              {% else %}
+                <span class="text-slate-500">{{ d.source }}</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2">
+              <span class="pill {{ d.action }}">{{ d.action }}</span>
+            </td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ d.qty if d.qty is not none else "—" }}</td>
+            <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.2f}".format(d.price) if d.price is not none else "—" }}</td>
+            <td class="px-3 py-2 text-slate-600">{{ d.reason }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="text-xs text-slate-400">
+    수동 입력은 <code>output/simulate/manual_input.csv</code> 를 편집한 뒤 <code>candle simulate</code> 재실행.
+  </p>
+</main>
+
+</body>
+</html>

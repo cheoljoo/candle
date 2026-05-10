@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>전략별 요약 — Candle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="border-b bg-white">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold">Candle Dashboard — 전략별 요약</h1>
+      <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+    </div>
+  </div>
+</header>
+
+{% include "_nav.html" %}
+
+
+{% include "_type_legend.html" %}
+
+<main class="max-w-7xl mx-auto p-4 space-y-6">
+
+  {# ── 전략별 요약 (기간 탭) ──────────────────────────────── #}
+  <section class="bg-white rounded-lg shadow-sm p-4"
+           x-data="{ cmp_tab: '{{ compare_period_list[0] if compare_period_list else '' }}' }">
+    <h2 class="text-base font-semibold mb-1">전략별 요약 (compare)</h2>
+    {% if compare_period_list %}
+    {# 기간 탭 #}
+    <div class="border-b mb-3 flex gap-1 flex-wrap text-sm">
+      {% for p in compare_period_list %}
+      <button @click="cmp_tab='{{ p }}'"
+              :class="cmp_tab==='{{ p }}' ? 'border-b-2 border-slate-800 font-semibold' : 'text-slate-500'"
+              class="px-3 py-2 whitespace-nowrap">{{ p }}</button>
+      {% endfor %}
+    </div>
+    {# 탭 내용 #}
+    {% for period, rows in compare_all.items() %}
+    <div x-show="cmp_tab==='{{ period }}'">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="bg-slate-100 text-slate-600 text-xs">
+            <tr>
+              <th class="text-left px-3 py-2">전략</th>
+              <th class="text-left px-3 py-2">그룹</th>
+              <th class="text-right px-3 py-2">종목수</th>
+              <th class="text-right px-3 py-2">총자산</th>
+              <th class="text-right px-3 py-2">초기자본</th>
+              <th class="text-right px-3 py-2">손익</th>
+              <th class="text-right px-3 py-2">수익률 (%)</th>
+              <th class="text-right px-3 py-2">매수</th>
+              <th class="text-right px-3 py-2">매도</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% set ns = namespace(prev_strategy='') %}
+            {% for r in rows %}
+            {% set grp_val = r.get('group', r.get('currency', '')) %}
+            {% set is_total = grp_val.startswith('TOTAL') %}
+            {% set strategy_changed = ns.prev_strategy != r.strategy %}
+            {% set ns.prev_strategy = r.strategy %}
+            <tr class="border-t
+              {% if is_total %}bg-slate-50 font-semibold{% endif %}
+              {% if strategy_changed and not loop.first %}border-t-2 border-slate-300{% endif %}">
+              <td class="px-3 py-2 font-medium">
+                {% if strategy_changed %}{{ r.strategy }}{% endif %}
+              </td>
+              <td class="px-3 py-2
+                {% if is_total %}text-slate-500 italic{% endif %}">
+                {{ grp_val }}
+              </td>
+              <td class="px-3 py-2 text-right tabular-nums text-slate-500">{{ r.get('tickers', '') }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.0f}".format(r["총자산"]) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.0f}".format(r["초기자본"]) }}</td>
+              <td class="px-3 py-2 text-right tabular-nums {% if r['손익'] >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">
+                {{ "{:,.0f}".format(r["손익"]) }}
+              </td>
+              <td class="px-3 py-2 text-right tabular-nums
+                {% if r['수익률'] >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}
+                {% if is_total %}text-base{% endif %}">
+                {{ "%.2f"|format(r["수익률"]) }}%
+              </td>
+              <td class="px-3 py-2 text-right">{{ r["매수횟수"] }}</td>
+              <td class="px-3 py-2 text-right">{{ r["매도횟수"] }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endfor %}
+    {% else %}
+      <p class="text-sm text-slate-500">
+        compare 결과가 없습니다.
+        <code>make v2-backtest-compare-full</code> 을 먼저 실행하세요.
+      </p>
+    {% endif %}
+  </section>
+
+  <p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+</main>
+
+</body>
+</html>

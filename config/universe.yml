@@ -1,0 +1,58 @@
+# req.md §1.1.1
+# KOSPI200 / S&P500은 동적 — fetch 시 매번 갱신.
+# ETF는 고정 list. ticker 코드는 fetch 시 자동 보강(pykrx로 이름→코드 매핑).
+
+groups:
+  KOSPI200:
+    market: KR
+    currency: KRW
+    source: pykrx_index_1028     # KOSPI 200 = index code 1028
+    rank_in_group: true
+
+  SP500:
+    market: US
+    currency: USD
+    source: wikipedia_sp500
+    rank_in_group: true
+
+  ETF_KR:
+    market: KR
+    currency: KRW
+    rank_in_group: false
+    items:
+      - { name: "KODEX 미국배당커버드콜액티브", ticker: null }
+      - { name: "RISE 테슬라미국채타겟커버드콜혼합(합성)", ticker: null }
+      - { name: "ACE 미국10년국채액티브(H)", ticker: null }
+      - { name: "KODEX 방산TOP10", ticker: null }
+      - { name: "KODEX 미국30년국채타겟커버드콜", ticker: null }
+      - { name: "TIGER 코리아AI전력기기TOP3플러스", ticker: null }
+      - { name: "RISE 200위클리커버드콜", ticker: null }
+      - { name: "ACE 미국빅테크7+데일리타겟커버드콜", ticker: null }
+      - { name: "KODEX 코스닥150", ticker: null }
+      - { name: "TIMEFOLIO 미국나스닥100액티브", ticker: null }
+      - { name: "SOL 금융지주플러스고배당", ticker: null }
+
+  ETF_US:
+    market: US
+    currency: USD
+    rank_in_group: false
+    items:
+      - { ticker: VOO,  name: "Vanguard S&P 500 ETF" }
+      - { ticker: SPY,  name: "SPDR S&P 500 ETF Trust" }
+      - { ticker: QQQ,  name: "Invesco QQQ Trust" }
+      - { ticker: SCHD, name: "Schwab US Dividend Equity ETF" }
+      - { ticker: JEPI, name: "JPMorgan Equity Premium Income ETF" }
+      - { ticker: SOXX, name: "iShares Semiconductor ETF" }
+      - { ticker: XLE,  name: "Energy Select Sector SPDR" }
+      # SOX (PHLX Semiconductor index) 는 yfinance 에서 ^SOX 이며 거래 ETF 아님.
+      # SOXX 가 동일 인덱스 추적 ETF — 중복 제거.
+
+# smoke run / dev 용 작은 universe (cli --small 옵션)
+small_universe:
+  KR:
+    - { ticker: "005930", name: "삼성전자",   group: KOSPI200 }
+    - { ticker: "000660", name: "SK하이닉스", group: KOSPI200 }
+  US:
+    - { ticker: "AAPL", name: "Apple",   group: SP500 }
+    - { ticker: "MSFT", name: "Microsoft", group: SP500 }
+    - { ticker: "VOO",  name: "Vanguard S&P 500 ETF", group: ETF_US }
