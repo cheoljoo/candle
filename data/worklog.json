@@ -264,5 +264,55 @@
       }
     ],
     "project": "CANDLE"
+  },
+  {
+    "date": "2026-05-11",
+    "start": "01:19",
+    "end": "09:54",
+    "duration": "8h 35m",
+    "tool": "vscode-copilot",
+    "session_id": "unknown",
+    "project": "candle",
+    "tasks": [
+      {
+        "title": "streak_grid.py debug 로그 정리",
+        "detail": "_debug_log() 헬퍼 추가. debug 모드일 때만 streak 로딩/완료/그룹별 진행 로그 출력. 일반 실행 시 노이즈 제거. approx by mtime.",
+        "start": "01:19",
+        "end": "04:00",
+        "duration": "2h 41m"
+      },
+      {
+        "title": "optimize.html RANK 정렬 컬럼 추가",
+        "detail": "RANK_MAP JS 변수 주입, rank_in_group 정렬 버튼 및 컬럼 추가. approx by mtime.",
+        "start": "04:00",
+        "end": "07:00",
+        "duration": "3h 0m"
+      },
+      {
+        "title": "recipients.yml 수신자 추가 및 README Motivation 추가",
+        "detail": "cheoljoo.lee@lge.com 추가. README에 10월이평선 기반 투자 배경(Motivation) 섹션 추가. approx by mtime.",
+        "start": "07:00",
+        "end": "09:54",
+        "duration": "2h 54m"
+      }
+    ]
+  },
+  {
+    "date": "2026-05-12",
+    "start": "22:08",
+    "end": "22:19",
+    "duration": "0h 11m",
+    "tool": "vscode-copilot",
+    "session_id": "99bd5bbc-96aa-4a2e-b28b-f689149eaee3",
+    "project": "candle",
+    "tasks": [
+      {
+        "title": "dashboard 변곡점 테이블 종목명·수익률·Rank·링크 개선",
+        "detail": "index.html: Ticker 셀에 종목명(한글/영문) 표시, inflection 색상 구분, 기간수익률(best)+Rank 컬럼, 📊수익률/⚙최적화 링크 버튼 추가. render.py: name_map, period_table_by_ticker를 common_ctx에 추가. approx by mtime.",
+        "start": "22:08",
+        "end": "22:19",
+        "duration": "0h 11m"
+      }
+    ]
   }
 ]

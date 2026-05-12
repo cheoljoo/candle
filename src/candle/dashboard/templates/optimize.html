@@ -16,6 +16,7 @@
   var OPT_DATA     = {{ opt_data     | tojson }};
   var OPT_GROUPS   = {{ opt_groups   | tojson }};
   var OPT_LABELS   = {{ opt_labels   | tojson }};
+  var RANK_MAP     = {{ rank_map     | tojson }};
   var ETF_NAME_MAP = {{ etf_name_map | tojson }};
   var NAME_MAP = ETF_NAME_MAP;
   var ETF_PER_TICKER_GROUPS = ['ETF_KR', 'ETF_US'];
@@ -39,6 +40,11 @@
       tickerSortCol: 'avg_return',
       tickerSortDir: -1,
 
+      tickerRank: function(tk) {
+        var v = RANK_MAP[tk];
+        return (v != null && v !== '') ? +v : null;
+      },
+
       isEtfGroup: function() {
         return ETF_PER_TICKER_GROUPS.indexOf(this.curGroup) >= 0;
       },
@@ -58,8 +64,17 @@
         var col = this.tickerSortCol;
         var dir = this.tickerSortDir;
         return tickers.slice().sort(function(a, b) {
-          var va = sm[a] ? (sm[a][col] || 0) : 0;
-          var vb = sm[b] ? (sm[b][col] || 0) : 0;
+          var va = 0;
+          var vb = 0;
+          if (col === 'rank_in_group') {
+            var ra = (RANK_MAP[a] != null && RANK_MAP[a] !== '') ? +RANK_MAP[a] : Number.POSITIVE_INFINITY;
+            var rb = (RANK_MAP[b] != null && RANK_MAP[b] !== '') ? +RANK_MAP[b] : Number.POSITIVE_INFINITY;
+            va = ra;
+            vb = rb;
+          } else {
+            va = sm[a] ? (sm[a][col] || 0) : 0;
+            vb = sm[b] ? (sm[b][col] || 0) : 0;
+          }
           return (va < vb ? -1 : va > vb ? 1 : 0) * dir;
         });
       },
@@ -77,7 +92,10 @@
 
       setTickerSort: function(col) {
         if (this.tickerSortCol === col) this.tickerSortDir *= -1;
-        else { this.tickerSortCol = col; this.tickerSortDir = -1; }
+        else {
+          this.tickerSortCol = col;
+          this.tickerSortDir = (col === 'rank_in_group') ? 1 : -1;
+        }
       },
 
       tickerRetMap: function(ticker) {
@@ -481,6 +499,11 @@
                     class="px-2 py-1 rounded bg-slate-100">
               minus_days <span x-text="tickerArrow('minus_days')"></span>
             </button>
+            <button @click="setTickerSort('rank_in_group')"
+                    :class="tickerSortCol==='rank_in_group'?'text-indigo-600 font-semibold':'hover:text-slate-600'"
+                    class="px-2 py-1 rounded bg-slate-100">
+              rank <span x-text="tickerArrow('rank_in_group')"></span>
+            </button>
           </div>
         </div>
 
@@ -490,6 +513,10 @@
               <tr>
                 <th class="px-3 py-2 text-left">종목코드</th>
                 <th class="px-3 py-2 text-left">종목명</th>
+                <th class="px-3 py-2 text-right">
+                  RANK<br>
+                  <span class="text-indigo-600 font-mono">rank_in_group</span>
+                </th>
                 <th class="px-3 py-2 text-right">
                   최적 매수 연속일수<br>
                   <span class="text-emerald-600 font-mono">plus_days</span>
@@ -515,6 +542,9 @@
                     @click="curTicker = tk">
                   <td class="px-3 py-2 font-mono font-semibold text-slate-700" x-text="tk"></td>
                   <td class="px-3 py-2 text-slate-600 text-xs" x-text="ETF_NAME_MAP[tk] || '-'"></td>
+                  <td class="px-3 py-2 text-right tabular-nums text-slate-700"
+                    :class="tickerRank(tk) ? 'text-indigo-700 font-semibold' : 'text-slate-400'"
+                    x-text="tickerRank(tk) != null ? tickerRank(tk) : '-'"></td>
                   <td class="px-3 py-2 text-right font-mono font-semibold text-emerald-700"
                       x-text="(etfSummary()[tk] ? etfSummary()[tk].plus_days : '-') + (etfSummary()[tk] ? '일' : '')"></td>
                   <td class="px-3 py-2 text-right font-mono font-semibold text-rose-700"

@@ -597,3 +597,41 @@
 - **데이터 경로** : `output/optimize/per_ticker/{group}/{ticker}.csv` + `_summary.json` (4개 그룹 모두)
 - **규모**: KOSPI200 ~200종목 + SP500 ~500종목 → `make v2-optimize` 실행 시 ~700개 per-ticker CSV 추가 생성
 - **검증** : `candle dashboard --debug` 정상 완료 (pages=9, 0 traceback)
+
+---
+
+## 2026-05-11
+
+### streak_grid.py — debug 전용 로그 분리 (`_debug_log()`)
+- **사용자 요청** : optimize 실행 시 로그가 너무 많아 노이즈 발생.
+- **수정** : `_debug_log(enabled, message)` 헬퍼 추가. `debug=True` 일 때만 streak 로딩/완료/그룹별 진행/종목별 grid search 로그 출력. 일반 실행(`debug=False`)에서는 완전히 침묵.
+
+### optimize.html — RANK(`rank_in_group`) 컬럼 및 정렬 추가
+- **사용자 요청** : 종목별 최적화 테이블에 그룹 내 순위(rank)도 보고 싶다.
+- **수정**
+  - `render.py` → `opt_ctx["rank_map"]` 추가 (ticker → rank_in_group)
+  - `optimize.html` → `var RANK_MAP = {{ rank_map | tojson }}` 주입
+  - `tickerRank(tk)` 함수 추가, 정렬 로직에 `rank_in_group` case 분기 추가
+  - "rank" 정렬 버튼 추가, 기본 정렬 방향 = 오름차순(낮은 rank = 상위 종목)
+  - per-ticker 테이블 RANK 컬럼 추가
+
+### config/recipients.yml & README.md
+- `cheoljoo.lee@lge.com` 메일 수신자 추가
+- `README.md` 상단에 Motivation 섹션 추가 (10월이평선 기반 추세추종 투자 배경 설명)
+
+---
+
+## 2026-05-12
+
+### dashboard/templates/index.html — 변곡점 테이블 종목명·수익률·Rank·링크 개선
+- **사용자 요청** : 변곡점 발생(Action Required) 테이블에서 Ticker만으로는 종목을 알 수 없다. 종목명, 기간수익률, 그룹 내 Rank, 상세 링크를 함께 보여달라.
+- **수정** (`render.py`)
+  - `name_map`(ticker → 종목명) 빌드 로직을 `common_ctx` 생성 전으로 이동
+  - `period_table_by_ticker`(ticker → period_table row) 신규 추가
+  - 두 dict 모두 `common_ctx`에 추가 → 모든 템플릿에서 공유
+  - optimize.html 전용 `name_map` 중복 빌드 제거 (common_ctx 재사용)
+- **수정** (`templates/index.html`)
+  - "Ticker" 헤더 → "Ticker / 종목명", 종목코드 아래 종목명(한글/영문) 소자로 표시
+  - `-→+` 초록(`text-emerald-600`), `+→-` 빨강(`text-rose-600`) 색상 구분
+  - 기간 수익률(best) 컬럼 신규: 기간별 최고전략 수익률 `+XX.X%` 형식 + Rank 표시
+  - 상세 링크 컬럼 신규: 📊 수익률 (해당 그룹 backtest 페이지), ⚙ 최적화 (optimize.html) 버튼

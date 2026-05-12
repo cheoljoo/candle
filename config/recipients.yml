@@ -8,6 +8,7 @@ dashboard_url: "http://psncs.iptime.org/stock_candle"
 
 recipients:
   - email: cheoljoo@gmail.com
+  - email: cheoljoo.lee@lge.com
   - email: youngho.lge@gmail.com
   - email: baver.bae@gmail.com
   - email: flyingfunky@gmail.com

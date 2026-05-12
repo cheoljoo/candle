@@ -83,7 +83,7 @@
       <table class="min-w-full text-sm">
         <thead class="bg-slate-100 text-slate-600">
           <tr>
-            <th class="text-left px-3 py-2">Ticker</th>
+            <th class="text-left px-3 py-2">Ticker / 종목명</th>
             <th class="text-left px-3 py-2">Group</th>
             <th class="text-left px-3 py-2">Inflection</th>
             <th class="text-right px-3 py-2">Close</th>
@@ -91,19 +91,54 @@
             <th class="text-right px-3 py-2">PER</th>
             <th class="text-right px-3 py-2">PBR</th>
             <th class="text-right px-3 py-2">Rank</th>
+            <th class="text-left px-3 py-2">기간 수익률 (best)</th>
+            <th class="text-left px-3 py-2">상세 링크</th>
           </tr>
         </thead>
         <tbody>
           {% for r in inflections %}
           <tr class="border-t">
-            <td class="px-3 py-2 font-mono">{{ r.ticker }}</td>
+            <td class="px-3 py-2">
+              <span class="font-mono font-semibold">{{ r.ticker }}</span>
+              {% set tname = name_map.get(r.ticker, '') %}
+              {% if tname %}
+              <div class="text-xs text-slate-500 mt-0.5">{{ tname }}</div>
+              {% endif %}
+            </td>
             <td class="px-3 py-2 text-xs text-slate-500">{{ r.group_name }}</td>
-            <td class="px-3 py-2 font-medium">{{ r.inflection }}</td>
+            <td class="px-3 py-2 font-medium {% if r.inflection == '-→+' %}text-emerald-600{% else %}text-rose-600{% endif %}">{{ r.inflection }}</td>
             <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.2f}".format(r.close) if r.close is not none else "—" }}</td>
             <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.2f}".format(r.ma10m) if r.ma10m is not none else "—" }}</td>
             <td class="px-3 py-2 text-right tabular-nums">{{ "%.2f"|format(r.per) if r.per is not none else "—" }}</td>
             <td class="px-3 py-2 text-right tabular-nums">{{ "%.2f"|format(r.pbr) if r.pbr is not none else "—" }}</td>
             <td class="px-3 py-2 text-right tabular-nums">{{ r.rank_in_group if r.rank_in_group is not none else "—" }}</td>
+            <td class="px-3 py-2 text-xs">
+              {% set pt = period_table_by_ticker.get(r.ticker) %}
+              {% if pt and pt.period_returns %}
+                {% if pt.rank_in_group is not none %}
+                <div class="mb-1 text-slate-500">Rank: <span class="font-semibold text-slate-700">{{ pt.rank_in_group }}</span></div>
+                {% endif %}
+                {% for period, pdata in pt.period_returns.items() %}
+                  {% set br = pdata.best_return %}
+                  <div class="whitespace-nowrap leading-5">
+                    <span class="text-slate-400">{{ period }}:</span>
+                    <span class="font-semibold {% if br is not none and br > 0 %}text-emerald-600{% elif br is not none %}text-rose-600{% endif %}">
+                      {% if br is not none %}{{ "%+.1f"|format(br) }}%{% else %}—{% endif %}
+                    </span>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <span class="text-slate-400">—</span>
+              {% endif %}
+            </td>
+            <td class="px-3 py-2">
+              <div class="flex flex-col gap-1">
+                <a href="{{ r.group_name | lower }}.html"
+                   class="inline-block px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 whitespace-nowrap">📊 수익률</a>
+                <a href="optimize.html"
+                   class="inline-block px-2 py-0.5 text-xs bg-violet-50 text-violet-700 rounded hover:bg-violet-100 whitespace-nowrap">⚙ 최적화</a>
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>

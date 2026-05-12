@@ -1,13 +1,13 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-11 (6차)
+date: 2026-05-12 (7차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-11 현재 Phase 1~6 전체 구현 완료. 전체 4개 그룹 종목별 per-ticker 최적화 지원.**
+> **2026-05-12 현재 Phase 1~6 전체 구현 완료. 전체 4개 그룹 종목별 per-ticker 최적화 지원.**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 

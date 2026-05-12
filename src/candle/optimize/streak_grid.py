@@ -27,6 +27,12 @@ from ..storage import csv_io, paths
 log = logging.getLogger(__name__)
 
 
+def _debug_log(enabled: bool, message: str, *, flush: bool = False) -> None:
+    """Emit optimize progress logs only when debug mode is enabled."""
+    if enabled:
+        tprint(message, flush=flush)
+
+
 # ── 1. streak 사전 계산 ──────────────────────────────────────────────────
 def _compute_streaks(daily: pd.DataFrame) -> pd.DataFrame:
     """일봉 df → streak_sign, streak_len, close 컬럼 추가.
@@ -194,7 +200,7 @@ def run_all_groups(
     initial_capital = cfg.strategies["initial_capital"]
 
     # ── 1회 streak 로딩 (전체) ────────────────────────────────────────
-    tprint(f"[streak_grid] 전체 ticker streak 로딩 중... ({len(inst)}개, workers={workers})", flush=True)
+    _debug_log(debug, f"[streak_grid] 전체 ticker streak 로딩 중... ({len(inst)}개, workers={workers})", flush=True)
     t0 = time.perf_counter()
     ticker_list = [(str(r["ticker"]), str(r["market"]), str(r["currency"]),
                     str(r.get("group_name", "")))
@@ -223,10 +229,10 @@ def run_all_groups(
             else:
                 if debug:
                     print(f"[streak_grid][debug] ({done}/{n_total}) {mkt}/{tk} ({grp}) → SKIP (데이터 없음)", flush=True)
-            if not debug and (done % 100 == 0 or done == n_total):
-                tprint(f"[streak_grid]   로딩 {done}/{n_total}", flush=True)
+            if debug and (done % 100 == 0 or done == n_total):
+                _debug_log(debug, f"[streak_grid]   로딩 {done}/{n_total}", flush=True)
 
-    tprint(f"[streak_grid] 로딩 완료 — 유효 {len(loaded_all)}개, elapsed={time.perf_counter()-t0:.1f}s", flush=True)
+    _debug_log(debug, f"[streak_grid] 로딩 완료 — 유효 {len(loaded_all)}개, elapsed={time.perf_counter()-t0:.1f}s", flush=True)
     if not loaded_all:
         return {}
 
@@ -261,14 +267,14 @@ def run_all_groups(
 
     for group_label, loaded in targets:
         if not loaded:
-            tprint(f"[streak_grid] {group_label}: 데이터 없음, 건너뜀", flush=True)
+            _debug_log(debug, f"[streak_grid] {group_label}: 데이터 없음, 건너뜀", flush=True)
             continue
-        tprint(f"[streak_grid] [{group_label}] 그리드 서치 시작 — {len(loaded)}개 ticker", flush=True)
+        _debug_log(debug, f"[streak_grid] [{group_label}] 그리드 서치 시작 — {len(loaded)}개 ticker", flush=True)
         df = _grid_search(loaded, plus_min, plus_max, plus_step,
                           minus_min, minus_max, minus_step, top_n, group_label, debug=debug)
         out_csv = output_dir / f"streak_grid_{group_label}.csv"
         df.to_csv(out_csv, index=False)
-        tprint(f"[streak_grid] [{group_label}] 완료 → {out_csv.name}", flush=True)
+        _debug_log(debug, f"[streak_grid] [{group_label}] 완료 → {out_csv.name}", flush=True)
         results[group_label] = df
 
     # ── 전체 그룹 종목별 개별 grid search 추가 실행 (4개 그룹 동시) ──
@@ -281,7 +287,7 @@ def run_all_groups(
     def _run_per_ticker_group(g: str) -> None:
         group_loaded = per_ticker_group_data[g]
         if not group_loaded:
-            tprint(f"[streak_grid] [{g}] 종목별 grid search: 데이터 없음, 건너뜀", flush=True)
+            _debug_log(debug, f"[streak_grid] [{g}] 종목별 grid search: 데이터 없음, 건너뜀", flush=True)
             return
         run_per_ticker_group(
             group_loaded, g, output_dir,
@@ -319,13 +325,14 @@ def run_per_ticker_group(
 
     n = len(loaded_group)
 
-    def _one_ticker(item: tuple) -> tuple[str, dict]:
+    def _one_ticker(item: tuple, idx: int, total: int) -> tuple[str, dict]:
         tk, ev, lc, ic, grp = item
-        tprint(f"[streak_grid] [{group_name}] {tk} grid search...", flush=True)
+        _debug_log(debug, f"[streak_grid] [{group_name}] {tk} grid search...", flush=True)
         single = [(tk, ev, lc, ic, grp)]
+        label = f"{group_name}/{tk} ({idx}/{total})"
         df = _grid_search(single, plus_min, plus_max, plus_step,
                           minus_min, minus_max, minus_step, top_n,
-                          f"{group_name}/{tk}", debug=debug)
+                          label, debug=debug)
         df.to_csv(per_dir / f"{tk}.csv", index=False)
         best = df.iloc[0]
         if debug:
@@ -340,19 +347,22 @@ def run_per_ticker_group(
         }
 
     summary: dict[str, dict] = {}
-    tprint(f"[streak_grid] [{group_name}] 종목별 grid search 시작 — {n}개 ticker (workers={min(workers, n)})", flush=True)
+    _debug_log(debug, f"[streak_grid] [{group_name}] 종목별 grid search 시작 — {n}개 ticker (workers={min(workers, n)})", flush=True)
     with ThreadPoolExecutor(max_workers=min(workers, n)) as ex:
-        futs = {ex.submit(_one_ticker, item): item[0] for item in loaded_group}
+        futs = {
+            ex.submit(_one_ticker, item, idx, n): item[0]
+            for idx, item in enumerate(loaded_group, 1)
+        }
         done = 0
         for fut in as_completed(futs):
             tk, best_dict = fut.result()
             summary[tk] = best_dict
             done += 1
-            tprint(f"[streak_grid] [{group_name}] 완료 {done}/{n}: {tk}", flush=True)
+            _debug_log(debug, f"[streak_grid] [{group_name}] 완료 {done}/{n}: {tk}", flush=True)
 
     (per_dir / "_summary.json").write_text(
         _json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    tprint(f"[streak_grid] [{group_name}] 종목별 전체 완료 — {len(summary)}개 → {per_dir}", flush=True)
+    _debug_log(debug, f"[streak_grid] [{group_name}] 종목별 전체 완료 — {len(summary)}개 → {per_dir}", flush=True)
     return summary
 
 
@@ -405,14 +415,15 @@ def _grid_search(
             elif done % 20 == 0 or done == n_combos:
                 elapsed = time.perf_counter() - t0
                 eta = elapsed / done * (n_combos - done) if done < n_combos else 0
-                tprint(f"[streak_grid] [{label}]   {done}/{n_combos} ({elapsed:.0f}s, 잔여 ~{eta:.0f}s)", flush=True)
+                _debug_log(debug, f"[streak_grid] [{label}]   {done}/{n_combos} ({elapsed:.0f}s, 잔여 ~{eta:.0f}s)", flush=True)
 
     result_df = pd.DataFrame(rows).sort_values("avg_return", ascending=False).reset_index(drop=True)
     best = result_df.iloc[0]
-    tprint(f"[streak_grid] [{label}] ★ 최적: plus={best.plus_days} minus={best.minus_days} "
-           f"avg={best.avg_return:.1f}% hit={best.hit_rate:.1f}%", flush=True)
-    tprint(f"\n[streak_grid] [{label}] === 상위 {min(top_n, len(result_df))}개 ===")
-    print(result_df.head(top_n).to_string(index=False))
+    if debug:
+        _debug_log(debug, f"[streak_grid] [{label}] ★ 최적: plus={best.plus_days} minus={best.minus_days} "
+                   f"avg={best.avg_return:.1f}% hit={best.hit_rate:.1f}%", flush=True)
+        _debug_log(debug, f"\n[streak_grid] [{label}] === 상위 {min(top_n, len(result_df))}개 ===")
+        print(result_df.head(top_n).to_string(index=False))
     return result_df
 
 
@@ -454,7 +465,7 @@ def run(
     initial_capital = cfg.strategies["initial_capital"]
 
     # --- ticker별 streak 로딩 (thread pool) ---
-    tprint(f"[streak_grid] ticker streak 계산 중... ({len(inst)}개, workers={workers})", flush=True)
+    _debug_log(debug, f"[streak_grid] ticker streak 계산 중... ({len(inst)}개, workers={workers})", flush=True)
     t0 = time.perf_counter()
 
     ticker_list = [(str(r["ticker"]), str(r["market"]), str(r["currency"]))
@@ -483,13 +494,13 @@ def run(
             else:
                 if debug:
                     print(f"[streak_grid][debug] ({done}/{n_total}) {mkt}/{tk} → SKIP", flush=True)
-            if not debug and (done % 50 == 0 or done == n_total):
-                tprint(f"[streak_grid]   로딩 {done}/{n_total}", flush=True)
+            if debug and (done % 50 == 0 or done == n_total):
+                _debug_log(debug, f"[streak_grid]   로딩 {done}/{n_total}", flush=True)
 
-    tprint(f"[streak_grid] 유효 ticker={len(loaded)}개, elapsed={time.perf_counter()-t0:.1f}s", flush=True)
+    _debug_log(debug, f"[streak_grid] 유효 ticker={len(loaded)}개, elapsed={time.perf_counter()-t0:.1f}s", flush=True)
 
     if not loaded:
-        tprint("[streak_grid] 유효 ticker 없음. 종료", flush=True)
+        _debug_log(debug, "[streak_grid] 유효 ticker 없음. 종료", flush=True)
         return pd.DataFrame()
 
     # --- (plus_days, minus_days) 그리드 서치 ---
@@ -500,8 +511,8 @@ def run(
     # CSV 저장
     if output_csv:
         result_df.to_csv(output_csv, index=False)
-        tprint(f"[streak_grid] 전체 결과 저장: {output_csv}", flush=True)
+        _debug_log(debug, f"[streak_grid] 전체 결과 저장: {output_csv}", flush=True)
 
     total_elapsed = 0  # _grid_search 내부 측정
-    tprint(f"[streak_grid] 완료 — 전체 {total_elapsed:.1f}s", flush=True)
+    _debug_log(debug, f"[streak_grid] 완료 — 전체 {total_elapsed:.1f}s", flush=True)
     return result_df

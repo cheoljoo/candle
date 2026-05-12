@@ -74,10 +74,19 @@ def render(cfg: config.Config, on_date: date,
 
     inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
 
+    # ticker → 종목명 매핑 (index.html inflection 테이블에서 사용)
+    name_map: dict[str, str] = {}
+    if not inst.empty:
+        for _, r in inst.iterrows():
+            name_map[str(r["ticker"])] = str(r["name"])
+
     tprint(f"[dashboard] 기간별 ticker 수익률 테이블 구성 ({len(inst)}개 ticker)...", flush=True)
     t0 = time.perf_counter()
     period_table, bt_periods = _build_period_table(cfg)
     tprint(f"[dashboard] 수익률 테이블 완료 — {len(period_table)}개 ticker × {len(bt_periods)}기간 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
+    # ticker → period_table row (index.html inflection 테이블 기간수익률 조회용)
+    period_table_by_ticker: dict[str, dict] = {r["ticker"]: r for r in period_table}
 
     # 그룹별 분리
     groups = ["KOSPI200", "SP500", "ETF_KR", "ETF_US"]
@@ -119,6 +128,8 @@ def render(cfg: config.Config, on_date: date,
         period_table=period_table,
         periods=bt_periods,
         type_descriptions=type_descriptions,
+        name_map=name_map,
+        period_table_by_ticker=period_table_by_ticker,
     )
 
     # index.html
@@ -174,18 +185,13 @@ def render(cfg: config.Config, on_date: date,
     tprint("[dashboard] optimize.html 렌더...", flush=True)
     t0 = time.perf_counter()
     opt_data = _load_optimize_results(cfg)
-    # 전체 종목 이름 lookup (ticker → name)
-    name_map: dict[str, str] = {}
-    if not inst.empty:
-        for _, r in inst.iterrows():
-            name_map[str(r["ticker"])] = str(r["name"])
     opt_tpl = env.get_template("optimize.html")
     opt_ctx = dict(common_ctx)
     opt_ctx["opt_data"] = opt_data
     opt_ctx["opt_groups"] = _OPT_GROUPS
     opt_ctx["opt_labels"] = _OPT_LABELS
     opt_ctx["etf_name_map"] = name_map  # backward compat alias
-    opt_ctx["name_map"] = name_map
+    opt_ctx["rank_map"] = rank_map
     (out_dir / "optimize.html").write_text(opt_tpl.render(**opt_ctx), encoding="utf-8")
     n_all = len(opt_data.get("all", []))
     tprint(f"[dashboard] optimize.html 완료 — 전체 {n_all}개 조합 ({time.perf_counter()-t0:.1f}s)", flush=True)

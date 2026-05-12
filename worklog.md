@@ -1,3 +1,16 @@
+## 2026-05-12 22:08 ~ 22:19 (0h 11m) [tool: vscode-copilot / session: 99bd5bbc-96aa-4a2e-b28b-f689149eaee3]
+- `dashboard/templates/index.html` 변곡점 테이블 개선: Ticker 셀에 종목명(한글/영문) 부제목 표시
+- 변곡점 inflection 신호(`-→+`/`+→-`) 색상 구분 추가 (초록/빨강)
+- 기간 수익률(best) 컬럼 추가: 기간별 최고전략 수익률 인라인 표시 + 그룹 내 Rank 표시
+- 상세 링크 컬럼 추가: 📊 수익률(해당 그룹 backtest 페이지), ⚙ 최적화(optimize.html) 버튼
+- `dashboard/render.py`: `name_map`(ticker→종목명) 및 `period_table_by_ticker`(ticker→수익률row)를 `common_ctx`에 추가
+
+## 2026-05-11 01:19 ~ 09:54 (8h 35m) [tool: vscode-copilot / session: unknown]
+- `optimize/streak_grid.py`: `_debug_log()` 헬퍼 추가 — debug 모드일 때만 streak 로딩/완료/그룹별 진행 로그 출력 (일반 실행 시 노이즈 제거)
+- `dashboard/templates/optimize.html`: 종목별 최적화 테이블에 RANK(`rank_in_group`) 컬럼 및 정렬 버튼 추가, `RANK_MAP` JS 변수 주입
+- `config/recipients.yml`: `cheoljoo.lee@lge.com` 메일 수신자 추가
+- `README.md`: Motivation 섹션 추가 — 10월이평선 기반 추세추종 투자 배경 설명
+
 ## 2026-04-23 10:40 ~ 11:12 (0h 32m) [tool: gemini-cli / session: unknown]
 - `backtest_compare.py` 크래시 수정: 시가총액 순위 데이터(`rank_context`)가 없는 그룹(예: ETF)에서 `type4`, `type4_2` 전략 실행 시 발생하는 `AttributeError` 해결
 - `backtest_type4.py` 공통 함수 보완: `can_buy_type4`, `simulate_type4`, `simulate_type4_capital`에 `rank_context=None` 방어 로직 및 "미지원" 상태 반환 추가
