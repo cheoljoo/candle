@@ -635,3 +635,70 @@
   - `-→+` 초록(`text-emerald-600`), `+→-` 빨강(`text-rose-600`) 색상 구분
   - 기간 수익률(best) 컬럼 신규: 기간별 최고전략 수익률 `+XX.X%` 형식 + Rank 표시
   - 상세 링크 컬럼 신규: 📊 수익률 (해당 그룹 backtest 페이지), ⚙ 최적화 (optimize.html) 버튼
+
+### gmail-etf 기능 신규 구현 — `src/candle/gmail_etf/`
+- **사용자 요청** : Gmail로 ETF TICKER를 요청하면 자동으로 universe에 추가하고 결과를 답장으로 받고 싶다.
+- **구현** (`src/candle/gmail_etf/__init__.py`, `reader.py`, `resolver.py`, `run.py`)
+  - **reader.py** : Gmail API (gmail.readonly 스코프) — 기존 `token.json` 재사용 가능. 제목 패턴 `[candle][v2] YYYY-MM-DD 투자 리포트` 매칭, 본문 `TICKER : ...` 파싱.
+  - **resolver.py** : ticker 시장 판별(`detect_market`) + 종목 정보 조회(`resolve_ticker`).
+    - KR: pykrx → FDR → yfinance `.KS` 순 fallback
+    - US: yfinance
+  - **run.py** : 오케스트레이션. 미처리 메일 → ticker 파싱 → 등록/중복/실패 분류 → `etf_user.json` + `instruments.csv` + ETF 그룹 CSV 즉시 반영 → SMTP 답장 발송 → 상태/이력 저장
+  - **SMTP 답장** : `smtplib.SMTP_SSL("smtp.gmail.com", 465)` — Gmail API `gmail.modify` 불필요. `gmail.readonly` 토큰만으로 동작.
+  - **owner CC** : 답장 수신자에 발신자 + owner 모두 포함 (`To: from_email, owner`)
+  - **이력 파일** : `data/gmail_etf_history.json` — `{datetime, by, ticker, name, market, group_name}` 항목 누적 저장
+- **KR 알파뉴메릭 ticker 지원** (`resolver.py` 버그 수정)
+  - 기존: `_KR_RE = re.compile(r"^\d{6}$")` — 순수 숫자 6자리만 KR로 인식
+  - 수정: `_KR_RE = re.compile(r"^[0-9A-Z]{6}$")` — 영숫자 혼합 6자리도 KR 인식
+  - 배경: `0190Y0` (TIGER 구글밸류체인 ETF, 2026-05-12 신규 상장) 처리 불가 → pykrx 미지원 → yfinance `.KS` fallback으로 `Mirae Asset Tiger Google Value Chain Etf` 조회 성공
+- **Makefile** : `v2-gmail-etf`, `v2-gmail-etf-dry` 타겟 추가
+- **cli.py** : `gmail-etf` subcommand 추가 (`--dry-run`, `--debug` 옵션)
+
+### dashboard — ETF 등록 이력 페이지 신규 추가
+- **사용자 요청** : dashboard 홈에 "이력" 탭을 추가해 gmail-etf로 추가된 종목의 등록 일시·등록자를 볼 수 있게 해달라.
+- **수정**
+  - `templates/_nav.html` : "문서" 다음 "이력" 링크 추가
+  - `templates/history.html` 신규: 요약 카드(총 건수/KR/US/등록자 수) + 시장·등록자 필터 + 최신순 테이블
+  - `render.py` : `_load_etf_history()` 추가, `history.html` 렌더 (총 10개 파일)
+  - `data/gmail_etf_history.json` : `0190Y0` 초기 항목 수동 추가 (2026-05-13, cheoljoo@gmail.com)
+
+### README.md — ETF 종목 등록 섹션 추가
+- `claude/register_etf_ticker.md` 신규 생성: 이메일 형식, 처리 실행, 답장 예시(성공/실패), 지원 ticker 형식 표
+- `README.md` 맨 끝에 "ETF 종목 등록" 섹션 추가 (동일 내용)
+- dashboard `docs.html` 문서 목록에 "ETF 종목 등록" 항목 추가 (`_DOC_LABELS`, `_DOC_ORDER` 갱신)
+
+### analyze/run.py — FutureWarning 수정
+- **증상** : `uv run candle analyze --market all` 실행 시 `FutureWarning: Setting an item of incompatible dtype` 반복 출력
+- **원인** : `out[col] = pd.NA`로 초기화된 컬럼(object dtype)에 float64 DataFrame의 새 값을 `iloc` 할당할 때 dtype 불일치
+- **수정** : `import numpy as np` 추가. `iloc` 할당 전 컬럼 dtype 확인 후 명시적 캐스팅 — float 컬럼은 `to_numpy(dtype=float, na_value=np.nan)`, object 컬럼은 `to_numpy(dtype=object)`
+
+---
+
+## 2026-05-13
+
+### dashboard index.html — owner 이메일 표시
+- **사용자 요청** : dashboard 홈 헤더에 owner 이름과 이메일 주소 표시 (이철주, cheoljoo@gmail.com).
+- **수정**
+  - `render.py` : `common_ctx`에 `owner_name="이철주"`, `owner_email=cfg.recipients.get("owner", "")` 추가 (`config/recipients.yml` 의 `owner` 값 자동 반영).
+  - `templates/index.html` : 헤더 기준일/생성 시각 아래에 `Owner: 이철주 <cheoljoo@gmail.com>` 표시 (mailto 링크 포함).
+  - `dashboard_site/index.html` : 현재 생성된 파일에도 동일하게 반영.
+
+### candle.sh — make v2-all 실행 + 날짜별 log backup
+- **사용자 요청** : `candle.sh`를 `make v2-all`을 수행하도록 변경. 실행 로그를 날짜별로 backup.
+- **수정** (`candle.sh` 전면 재작성)
+  - 기존 pvs_crawler 관련 코드 전부 제거.
+  - `CANDLE_DIR=/home/cheoljoo/code/candle` 로 이동 후 `make v2-all 2>&1 | tee v2-all.log`.
+  - 실행 후 `v2-all_YYYY_MM_DD.log` 형태로 날짜 백업. 같은 날 여러 번 실행 시 `-1`, `-2` 번호 자동 부여.
+
+### dashboard group_returns.html — 신규 상장/데이터 부족 종목 표시
+- **사용자 요청** : `0190Y0`처럼 최근 상장되어 MA10M 계산(최소 200행)이 불가한 종목도 ETF_KR 등 그룹 페이지에 표시하되 이유를 설명해 달라. 매일 fetch가 쌓이면 자동으로 수익률 테이블로 이동.
+- **배경** : `0190Y0` (TIGER 구글밸류체인 ETF)는 2일치 데이터만 존재 → ma10m=NaN → backtest 신호 없음 → period_table 미포함.
+- **수정** (`render.py`)
+  - `MA10M_MIN_ROWS = 200` 상수 정의.
+  - `instruments.csv`에 있지만 `period_table`에 없는 종목을 순회.
+  - `data/daily/{market}/{ticker}.csv` 행 수(헤더 제외)를 직접 세어 200행 미만이면 `new_listings_by_group[grp]`에 추가 (`{ticker, name, row_count, needed}` dict).
+  - 그룹 렌더 컨텍스트에 `new_listings` 전달.
+- **수정** (`templates/group_returns.html`)
+  - 기존 수익률 테이블 아래 황색(amber) 섹션 신규 추가 (`{% if new_listings %}`).
+  - 종목명, 보유 데이터(일수), 필요 데이터(200일), 진행률 바(%) 표시.
+  - 200일 도달 시 자동으로 수익률 테이블에 포함됨을 안내.

@@ -131,6 +131,28 @@ def update(cfg: config.Config, as_of: date, small: bool = False, debug: bool = F
     for _, r in etf_us_df.iterrows():
         rows.append({"ticker": r["ticker"], "name": r["name"], "market": "US",
                      "group_name": "ETF_US", "currency": "USD", "active": 1})
+
+    # 사용자 메일 요청으로 추가된 ETF (data/universe/etf_user.json) 병합
+    user_etf_path = data_dir / "universe" / "etf_user.json"
+    if user_etf_path.exists():
+        try:
+            import json as _json
+            user_entries: list[dict] = _json.loads(user_etf_path.read_text(encoding="utf-8"))
+            for entry in user_entries:
+                if entry.get("ticker"):
+                    rows.append({
+                        "ticker": entry["ticker"],
+                        "name": entry.get("name", entry["ticker"]),
+                        "market": entry.get("market", "US"),
+                        "group_name": entry.get("group_name", "ETF_US"),
+                        "currency": entry.get("currency", "USD"),
+                        "active": 1,
+                    })
+            if debug:
+                print(f"[universe][debug] etf_user.json 병합 — {len(user_entries)}개")
+        except Exception as e:
+            log.warning(f"etf_user.json 로드 실패: {e}")
+
     inst = pd.DataFrame(rows)
     if not inst.empty:
         inst = inst.drop_duplicates(subset=["ticker"], keep="first")

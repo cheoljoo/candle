@@ -23,6 +23,7 @@ class Config:
     universe: dict[str, Any]
     strategies: dict[str, Any]
     runtime: dict[str, Any]
+    recipients: dict[str, Any]
 
     @property
     def repo_root(self) -> Path:
@@ -37,9 +38,18 @@ class Config:
         return REPO_ROOT / self.runtime["paths"]["output"]
 
 
+def _load_recipients() -> dict[str, Any]:
+    p = CONFIG_DIR / "recipients.yml"
+    if not p.exists():
+        return {"owner": "", "recipients": [], "dashboard_url": ""}
+    with p.open("r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
 def load() -> Config:
     return Config(
         universe=_load_yaml("universe.yml"),
         strategies=_load_yaml("strategies.yml"),
         runtime=_load_yaml("runtime.yml"),
+        recipients=_load_recipients(),
     )

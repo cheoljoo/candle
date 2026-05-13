@@ -94,6 +94,32 @@ def render(cfg: config.Config, on_date: date,
         g: [r for r in period_table if r["group_name"] == g] for g in groups
     }
 
+    # 데이터 부족 종목 감지 (instruments 에는 있지만 period_table 에 없는 종목)
+    # MA10M 계산에 최소 200행 필요 → 그 미만이면 "신규 상장 추정"으로 분류
+    MA10M_MIN_ROWS = 200
+    tickers_in_table: set[str] = {r["ticker"] for r in period_table}
+    new_listings_by_group: dict[str, list[dict]] = {g: [] for g in groups}
+    if not inst.empty:
+        for _, r in inst.iterrows():
+            tk = str(r["ticker"])
+            grp = str(r.get("group_name", ""))
+            if tk in tickers_in_table or grp not in groups:
+                continue
+            market = str(r.get("market", "KR"))
+            csv_path = paths.daily_csv(cfg.data_dir, market, tk)
+            row_count = 0
+            if csv_path.exists():
+                try:
+                    row_count = sum(1 for _ in csv_path.open("r", encoding="utf-8")) - 1  # 헤더 제외
+                except Exception:
+                    pass
+            new_listings_by_group[grp].append({
+                "ticker": tk,
+                "name": str(r.get("name", tk)),
+                "row_count": row_count,
+                "needed": MA10M_MIN_ROWS,
+            })
+
     # ── 템플릿 렌더 ────────────────────────────────────────────────────────
     env = Environment(
         loader=FileSystemLoader(str(Path(__file__).parent / "templates")),
@@ -114,6 +140,8 @@ def render(cfg: config.Config, on_date: date,
     common_ctx = dict(
         as_of=actual_date,
         generated_at=datetime.now().isoformat(timespec="seconds"),
+        owner_name="이철주",
+        owner_email=cfg.recipients.get("owner", ""),
         kpi={
             "tickers": (0 if inst.empty else len(inst)),
             "decisions_today": len(decisions),
@@ -154,6 +182,7 @@ def render(cfg: config.Config, on_date: date,
         group_ctx = dict(common_ctx)
         group_ctx["group_name"] = g
         group_ctx["period_table"] = period_table_by_group.get(g, [])
+        group_ctx["new_listings"] = new_listings_by_group.get(g, [])
         (out_dir / fname).write_text(group_tpl.render(**group_ctx), encoding="utf-8")
         tprint(f"[dashboard] {fname} 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
@@ -180,6 +209,16 @@ def render(cfg: config.Config, on_date: date,
     docs_ctx["docs"] = docs
     (out_dir / "docs.html").write_text(docs_tpl.render(**docs_ctx), encoding="utf-8")
     tprint(f"[dashboard] docs.html 완료 — {len(docs)}개 문서 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
+    # history.html
+    tprint("[dashboard] history.html 렌더...", flush=True)
+    t0 = time.perf_counter()
+    etf_history = _load_etf_history(cfg)
+    hist_tpl = env.get_template("history.html")
+    hist_ctx = dict(common_ctx)
+    hist_ctx["history"] = etf_history
+    (out_dir / "history.html").write_text(hist_tpl.render(**hist_ctx), encoding="utf-8")
+    tprint(f"[dashboard] history.html 완료 — {len(etf_history)}건 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     # optimize.html
     tprint("[dashboard] optimize.html 렌더...", flush=True)
@@ -214,11 +253,11 @@ def render(cfg: config.Config, on_date: date,
     tprint(f"[dashboard] JSON 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     total_elapsed = time.perf_counter() - _t_total
-    tprint(f"[dashboard] 완료 — 9개 파일, 전체 {total_elapsed:.1f}s", flush=True)
+    tprint(f"[dashboard] 완료 — 10개 파일, 전체 {total_elapsed:.1f}s", flush=True)
 
     return {
         "out": str(out_dir / "index.html"),
-        "pages": 9,
+        "pages": 10,
         "decisions": len(decisions),
         "compare_periods": len(compare_period_list),
         "inflections": len(inflections),
@@ -510,6 +549,7 @@ _DOC_LABELS: dict[str, str] = {
     "claude-work":            "작업 이력",
     "msg":                    "메시지/노트",
     "gemini_analysis_report": "Gemini 분석",
+    "register_etf_ticker":    "ETF 종목 등록",
 }
 
 # 원하는 표시 순서 (목록에 없으면 알파벳 순으로 자동 추가 — 새 *.md 파일은 자동 반영)
@@ -520,6 +560,7 @@ _DOC_ORDER: list[str] = [
     "claude-work",
     "msg",
     "gemini_analysis_report",
+    "register_etf_ticker",
 ]
 
 
@@ -550,6 +591,17 @@ def _load_docs(cfg: config.Config) -> list[dict]:
     for stem in sorted(raw):
         ordered.append(raw[stem])
     return ordered
+
+
+def _load_etf_history(cfg: config.Config) -> list[dict]:
+    """data/gmail_etf_history.json 읽어 이력 반환."""
+    p = cfg.data_dir / "gmail_etf_history.json"
+    if not p.exists():
+        return []
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return []
 
 
 _OPT_GROUPS = ["all", "KOSPI200", "SP500", "ETF_KR", "ETF_US"]

@@ -14,6 +14,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from .. import config
@@ -175,8 +176,15 @@ def run(cfg: config.Config, market: str, today: date,
             if col not in out.columns:
                 out[col] = pd.NA
             if col in new_comp.columns:
-                out.iloc[new_start:new_start + n_new,
-                         out.columns.get_loc(col)] = new_comp[col].to_numpy()
+                col_idx = out.columns.get_loc(col)
+                col_dtype = out.dtypes.iloc[col_idx]
+                if pd.api.types.is_float_dtype(col_dtype):
+                    # float 컬럼: pd.NA → np.nan 으로 변환해 dtype 불일치 경고 방지
+                    vals: np.ndarray = new_comp[col].to_numpy(dtype=float, na_value=np.nan)
+                else:
+                    # object/string 컬럼: 그대로 object array
+                    vals = new_comp[col].to_numpy(dtype=object)
+                out.iloc[new_start:new_start + n_new, col_idx] = vals
 
         # ── rank merge (새 날짜만) ────────────────────────────────────
         if "rank_in_group" not in out.columns:

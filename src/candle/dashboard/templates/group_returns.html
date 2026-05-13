@@ -129,6 +129,51 @@
     {% endif %}
   </section>
 
+  {# ── 신규 상장 / 데이터 누적 중 종목 ────────────────────────────────── #}
+  {% if new_listings %}
+  <section class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+    <h2 class="text-base font-semibold text-amber-800 mb-1">📋 신규 상장 / 데이터 누적 중</h2>
+    <p class="text-xs text-amber-700 mb-3">
+      MA10M(10개월 이동평균) 계산에는 최소 200 거래일(약 10개월) 데이터가 필요합니다.
+      아래 종목은 아직 데이터가 부족하여 백테스트·수익률 테이블에 표시되지 않습니다.
+      매일 fetch가 실행되므로 데이터가 쌓이면 자동으로 포함됩니다.
+    </p>
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm border-collapse">
+        <thead class="bg-amber-100 text-amber-700 text-xs">
+          <tr>
+            <th class="text-left px-3 py-2">티커</th>
+            <th class="text-left px-3 py-2">종목명</th>
+            <th class="text-right px-3 py-2">보유 데이터</th>
+            <th class="text-right px-3 py-2">필요 데이터</th>
+            <th class="text-right px-3 py-2">진행률</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for nl in new_listings %}
+          {% set pct = (nl.row_count / nl.needed * 100) | round(1) %}
+          {% set pct_capped = [pct, 100] | min %}
+          <tr class="border-t border-amber-100">
+            <td class="px-3 py-2 font-mono font-semibold text-amber-900">{{ nl.ticker }}</td>
+            <td class="px-3 py-2 text-slate-700">{{ nl.name }}</td>
+            <td class="px-3 py-2 text-right tabular-nums text-slate-600">{{ nl.row_count }}일</td>
+            <td class="px-3 py-2 text-right tabular-nums text-slate-400">{{ nl.needed }}일</td>
+            <td class="px-3 py-2 text-right">
+              <div class="flex items-center justify-end gap-2">
+                <div class="w-24 bg-amber-200 rounded-full h-2">
+                  <div class="bg-amber-500 h-2 rounded-full" style="width: {{ pct_capped }}%"></div>
+                </div>
+                <span class="tabular-nums text-xs text-amber-700 w-10 text-right">{{ pct }}%</span>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
   <p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
 </main>
 

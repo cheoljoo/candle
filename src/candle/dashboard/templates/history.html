@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕯️</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ETF 등록 이력 — Candle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+<header class="border-b bg-white">
+  <div class="max-w-screen-2xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold">Candle Dashboard — ETF 등록 이력</h1>
+      <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+    </div>
+  </div>
+</header>
+
+{% include "_nav.html" %}
+
+<script>
+const HISTORY_DATA = {{ history | tojson }};
+</script>
+
+<div class="max-w-screen-xl mx-auto px-4 py-8"
+     x-data="historyApp()"
+     x-init="init()">
+
+  {# ── 요약 카드 ── #}
+  <div class="flex gap-4 mb-6 flex-wrap">
+    <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+      <div class="text-xs text-slate-400 mb-1">총 등록 종목</div>
+      <div class="text-2xl font-bold text-slate-800" x-text="total + '건'"></div>
+    </div>
+    <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+      <div class="text-xs text-slate-400 mb-1">KR ETF</div>
+      <div class="text-2xl font-bold text-emerald-600" x-text="countKR + '건'"></div>
+    </div>
+    <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+      <div class="text-xs text-slate-400 mb-1">US ETF</div>
+      <div class="text-2xl font-bold text-blue-600" x-text="countUS + '건'"></div>
+    </div>
+    <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+      <div class="text-xs text-slate-400 mb-1">등록자 수</div>
+      <div class="text-2xl font-bold text-slate-600" x-text="uniqueRequestors + '명'"></div>
+    </div>
+  </div>
+
+  {# ── 필터 바 ── #}
+  <div class="bg-white border rounded-xl px-4 py-3 mb-4 flex gap-4 flex-wrap items-center shadow-sm">
+    <div class="flex items-center gap-2">
+      <label class="text-xs text-slate-500 font-medium">시장</label>
+      <select x-model="filterMarket"
+              class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
+        <option value="">전체</option>
+        <option value="KR">KR</option>
+        <option value="US">US</option>
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs text-slate-500 font-medium">등록자</label>
+      <select x-model="filterBy"
+              class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
+        <option value="">전체</option>
+        <template x-for="r in requestors" :key="r">
+          <option :value="r" x-text="r"></option>
+        </template>
+      </select>
+    </div>
+    <div class="flex items-center gap-2 ml-auto">
+      <span class="text-xs text-slate-400" x-text="filtered.length + '건 표시'"></span>
+    </div>
+  </div>
+
+  {# ── 이력 테이블 ── #}
+  <div class="bg-white border rounded-xl shadow-sm overflow-hidden">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-slate-50 border-b">
+          <th class="px-4 py-3 text-left font-semibold text-slate-600 w-40">등록 일시</th>
+          <th class="px-4 py-3 text-left font-semibold text-slate-600">등록자</th>
+          <th class="px-4 py-3 text-left font-semibold text-slate-600 w-24">Ticker</th>
+          <th class="px-4 py-3 text-left font-semibold text-slate-600">종목명</th>
+          <th class="px-4 py-3 text-left font-semibold text-slate-600 w-16">시장</th>
+          <th class="px-4 py-3 text-left font-semibold text-slate-600 w-24">그룹</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template x-if="filtered.length === 0">
+          <tr>
+            <td colspan="6" class="px-4 py-12 text-center text-slate-400 text-sm">이력이 없습니다.</td>
+          </tr>
+        </template>
+        <template x-for="(row, i) in filtered" :key="i">
+          <tr class="border-b last:border-0 hover:bg-slate-50 transition-colors">
+            <td class="px-4 py-3 font-mono text-xs text-slate-500" x-text="row.datetime"></td>
+            <td class="px-4 py-3 text-slate-700 text-xs" x-text="row.by"></td>
+            <td class="px-4 py-3">
+              <span class="font-mono font-semibold text-slate-800" x-text="row.ticker"></span>
+            </td>
+            <td class="px-4 py-3 text-slate-700" x-text="row.name"></td>
+            <td class="px-4 py-3">
+              <span
+                class="inline-block px-2 py-0.5 rounded text-xs font-semibold"
+                :class="row.market === 'KR'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-blue-100 text-blue-700'"
+                x-text="row.market">
+              </span>
+            </td>
+            <td class="px-4 py-3 text-xs text-slate-500" x-text="row.group_name"></td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script>
+function historyApp() {
+  return {
+    all: HISTORY_DATA,
+    filterMarket: '',
+    filterBy: '',
+
+    get filtered() {
+      return [...this.all]
+        .reverse()  // 최신순
+        .filter(r => !this.filterMarket || r.market === this.filterMarket)
+        .filter(r => !this.filterBy || r.by === this.filterBy);
+    },
+
+    get total() { return this.all.length; },
+    get countKR() { return this.all.filter(r => r.market === 'KR').length; },
+    get countUS() { return this.all.filter(r => r.market === 'US').length; },
+    get requestors() {
+      return [...new Set(this.all.map(r => r.by))].sort();
+    },
+    get uniqueRequestors() { return this.requestors.length; },
+
+    init() {},
+  }
+}
+</script>
+
+</body>
+</html>

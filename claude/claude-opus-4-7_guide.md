@@ -1,13 +1,13 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-12 (7차)
+date: 2026-05-13 (8차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-12 현재 Phase 1~6 전체 구현 완료. 전체 4개 그룹 종목별 per-ticker 최적화 지원.**
+> **2026-05-13 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능(Gmail → ETF 자동 등록) 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원.**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 
@@ -560,7 +560,52 @@ decisions.html
    컬럼: ticker, group, inflection, close, ma10m, per, pbr, rank
 ```
 
-### 6.3 사이드 JSON 산출물
+### 6.4 gmail-etf — Gmail 기반 ETF 자동 등록
+
+**파일**: `src/candle/gmail_etf/{__init__, reader, resolver, run}.py`
+
+```
+흐름:
+  Gmail API (gmail.readonly) → 제목 패턴 매칭
+    → 본문 "TICKER : ..." 파싱
+    → detect_market() (KR: 6자리 영숫자, US: 영문 1~5자)
+    → resolve_ticker() (pykrx → FDR → yfinance .KS 순 fallback)
+    → 등록/중복/실패 분류
+    → etf_user.json + instruments.csv + ETF CSV 즉시 반영
+    → SMTP 답장 (발신자 + owner 둘 다 To)
+    → data/gmail_etf_history.json 이력 저장
+```
+
+상태 파일: `data/gmail_etf_state.json` (처리된 msg ID), `data/gmail_etf_history.json` (등록 이력)
+
+이메일 형식:
+```
+제목: [candle][v2] YYYY-MM-DD 투자 리포트
+본문: TICKER : 069500, 0190Y0, SCHD, VOO
+```
+
+명령:
+```bash
+make v2-gmail-etf       # 실제 처리
+make v2-gmail-etf-dry   # dry-run
+```
+
+### 6.5 dashboard 파일 목록 (v2)
+
+| 파일 | 내용 |
+|------|------|
+| `index.html` | KPI 카드 + 변곡점(Action Required) — 종목명·수익률·Rank·링크 포함 |
+| `kospi200.html` | KOSPI200 종목 × 기간 수익률 (RANK 포함) |
+| `sp500.html` | S&P500 종목 × 기간 수익률 (RANK 포함) |
+| `etf_kr.html` | ETF_KR 종목 × 기간 수익률 |
+| `etf_us.html` | ETF_US 종목 × 기간 수익률 |
+| `compare.html` | 전략×그룹 수익률 비교 (period 탭) |
+| `decisions.html` | 오늘의 의사결정 (Rule/AI/Manual 탭 + type 필터) |
+| `optimize.html` | 전체 그룹 종목별 최적 파라미터 히트맵 |
+| `docs.html` | claude/ 문서 뷰어 (ETF 종목 등록 포함) |
+| `history.html` | Gmail-etf 등록 이력 (등록 일시·등록자·시장·그룹) |
+
+### 6.6 사이드 JSON 산출물
 
 ```
 dashboard_site/data/
@@ -587,6 +632,8 @@ dashboard_site/data/
 | 환율 비교 | KRW/USD 분리. cross 비교는 % 만 허용 |
 | mark_to_market | backtest 종료일 보유분 종가 평가 (실제 매도 아님) |
 | 편출입 강제매도 | 현재 미구현 — 향후 `membership.to_date` 기반 자동 매도 필요 |
+| KR 알파뉴메릭 ticker | `0190Y0` 등 영숫자 혼합 6자리 코드 지원. `_KR_RE = r"^[0-9A-Z]{6}$"` |
+| gmail-etf OAuth | gmail.readonly 스코프 유지. 답장은 SMTP. 기존 token.json 재사용 가능 |
 
 ---
 
@@ -602,7 +649,25 @@ dashboard_site/data/
 | dashboard FastAPI 2차 | 낮 | 수동 입력 폼 UI (현재는 CSV 직접 편집) |
 | v2 market_cap 저장 수정 | 중 | yfinance fast_info 가 현재 None 반환 → US/KR daily CSV 의 market_cap/rank_in_group 비어 있음. dashboard RANK 는 legacy `data/{kospi,sp500}_daily_rank.csv` 로 workaround 중 |
 | 백테스트 편입 전 종목 필터 | 중 | 매수 시점에 KOSPI200/SP500 구성원인 종목만 매수 |
+| gmail-etf 피드 연동 | 하 | 신규 ETF 등록 후 `make v2-fetch` 자동 트리거 |
 
 ---
 
-부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-11 (5차).
+부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-13 (9차).
+
+---
+
+### 2026-05-13 변경 사항 (9차)
+
+#### dashboard index.html — owner 이메일 헤더 표시
+- `render.py` `common_ctx`에 `owner_name`, `owner_email` 추가 → `config/recipients.yml` `owner` 값 자동 반영.
+- `templates/index.html` 헤더에 `Owner: 이철주 <cheoljoo@gmail.com>` (mailto 링크) 표시.
+
+#### candle.sh — make v2-all 래퍼
+- 기존 pvs_crawler 스크립트 → `make v2-all` 실행으로 전면 교체.
+- 실행 로그: `v2-all.log` 실시간 tee + `v2-all_YYYY_MM_DD[-N].log` 날짜별 백업.
+
+#### group_returns.html — 신규 상장/데이터 누적 중 섹션
+- **동작**: `instruments.csv`에 있지만 `period_table`에 없는 종목 중 daily CSV 행수 < 200인 종목을 감지.
+- **표시**: 수익률 테이블 아래 amber 배경 섹션에 진행률 바(row_count / 200) 포함 표시.
+- **자동화**: 매일 `make v2-all` 수행 시 fetch → analyze → backtest가 누적되면 200행 도달 시점에 수익률 테이블로 자동 이동.

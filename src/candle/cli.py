@@ -229,6 +229,34 @@ def optimize_streak(
         sg_run(cfg, market=market, output_csv=out_path, **kwargs)
 
 
+@app.command("gmail-etf")
+def gmail_etf(
+    credentials: Optional[str] = typer.Option(None, "--credentials",
+                                               help="credentials.json 경로 (기본: repo 루트)"),
+    token: Optional[str] = typer.Option(None, "--token",
+                                         help="token_gmail_etf.json 경로 (기본: repo 루트)"),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                  help="실제 등록/답장 없이 처리 결과만 확인"),
+    debug: bool = typer.Option(False, "--debug", help="상세 로그 출력"),
+):
+    """메일로 ETF ticker 추가 요청 처리.
+
+    조건에 맞는 메일(제목: [candle][v2] YYYY-MM-DD 투자 리포트, 본문: TICKER: XXX,YYY)을
+    읽어 종목 정보를 확인하고 universe에 자동 추가한 뒤 결과를 답장으로 발송합니다.
+
+    처리 상태는 data/gmail_etf_state.json 에 저장되어 중복 처리를 방지합니다.
+    추가된 ETF 목록은 data/universe/etf_user.json 에 보관되며,
+    candle universe 실행 시에도 자동 병합됩니다.
+    """
+    cfg = config.load()
+    _setup_logging(cfg, debug=debug)
+    from .gmail_etf import run as etf_run
+    cred_path = Path(credentials) if credentials else None
+    tok_path = Path(token) if token else None
+    res = etf_run.run(cfg, credentials_path=cred_path, token_path=tok_path, dry_run=dry_run)
+    typer.echo(f"gmail-etf: {res}")
+
+
 def main():
     app()
 

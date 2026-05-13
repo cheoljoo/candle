@@ -22,6 +22,7 @@
     <div>
       <h1 class="text-xl font-semibold">Candle Dashboard</h1>
       <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+      <p class="text-xs text-slate-400 mt-0.5">Owner: {{ owner_name }} &lt;<a href="mailto:{{ owner_email }}" class="hover:underline">{{ owner_email }}</a>&gt;</p>
     </div>
     <div class="flex gap-3 text-sm">
       <div class="px-3 py-2 bg-slate-100 rounded">

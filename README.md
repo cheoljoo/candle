@@ -288,3 +288,101 @@ export KRX_PW=your_pw
 
 - Python 3.13+  · 패키지 관리: `uv`
 - 주요 라이브러리: `yfinance`, `pykrx`, `FinanceDataReader`, `pandas`, `typer`, `jinja2`, `anthropic`
+
+---
+
+## ETF 종목 등록
+
+Gmail을 통해 이메일 한 통으로 ETF 종목을 시스템에 자동 등록할 수 있습니다.  
+등록된 ETF는 `data/universe/etf_user.json`에 저장되고 이후 일괄 분석에 즉시 반영됩니다.
+
+### 이메일 작성 규칙
+
+**받는 사람**: `cheoljoo@gmail.com`  
+**제목**: `[candle][v2] YYYY-MM-DD 투자 리포트` 형식이면 됩니다  
+(Re:, Fw: 등 접두사는 무시됩니다)
+
+**본문**:
+```
+TICKER : 종목코드1, 종목코드2, 종목코드3
+```
+
+- `TICKER :` 뒤에 쉼표(`,`)로 구분해 여러 종목을 한 번에 요청할 수 있습니다.
+- **한국 ETF**: KRX 6자리 코드 (숫자 `069500`, 또는 영숫자 혼합 `0190Y0` 모두 가능)
+- **미국 ETF**: 알파벳 1~5자리 심볼 (예: `VOO`, `SCHD`, `QQQ`)
+
+**예시 이메일**:
+```
+제목: [candle][v2] 2026-05-13 투자 리포트
+
+TICKER : 069500, 0190Y0, SCHD, VOO
+```
+
+### 처리 실행
+
+```bash
+# 미처리 메일 확인 + 처리 (실제 등록)
+make v2-gmail-etf
+
+# 처리 내용만 출력 (실제 등록 없음)
+make v2-gmail-etf-dry
+```
+
+처리 후 자동으로 발신자에게 결과 답장이 발송됩니다.
+
+---
+
+### 답장 예시 — 등록 성공
+
+```
+Re: [candle][v2] 2026-05-13 투자 리포트
+
+안녕하세요. ETF 등록 처리 결과를 알려드립니다.
+
+요청 ticker: 069500, 0190Y0, SCHD, VOO
+
+✅ 신규 등록 (2건):
+  • 0190Y0 — Mirae Asset Tiger Google Value Chain Etf (KR / ETF_KR)
+  • SCHD — Schwab US Dividend Equity ETF (US / ETF_US)
+
+⏭ 이미 등록됨 (2건):
+  • 069500 — KODEX 200
+  • VOO — Vanguard S&P 500 ETF
+
+처리 일시: 2026-05-13 00:06:24
+```
+
+---
+
+### 답장 예시 — 일부 실패
+
+```
+Re: [candle][v2] 2026-05-13 투자 리포트
+
+안녕하세요. ETF 등록 처리 결과를 알려드립니다.
+
+요청 ticker: 0190Y0, ABCDE, 999999
+
+✅ 신규 등록 (1건):
+  • 0190Y0 — Mirae Asset Tiger Google Value Chain Etf (KR / ETF_KR)
+
+❌ 등록 실패 (2건):
+  • ABCDE — 시장 판별 실패 또는 종목 정보 없음
+  • 999999 — 종목 정보를 찾을 수 없습니다
+
+처리 일시: 2026-05-13 00:06:24
+```
+
+실패 원인은 주로 다음과 같습니다:
+- 존재하지 않는 종목 코드
+- 7자리 이상이거나 형식이 맞지 않는 코드 (예: `TOOLONG`, `123`)
+- 신규 상장 직후 데이터 미제공 기간 (수 영업일 후 재요청 권장)
+
+---
+
+### 상태 및 목록 파일
+
+| 파일 | 내용 |
+|------|------|
+| `data/universe/etf_user.json` | 등록된 사용자 ETF 목록 |
+| `data/gmail_etf_state.json` | 처리 완료된 메시지 ID (중복 방지) |
