@@ -690,7 +690,7 @@
   - `CANDLE_DIR=/home/cheoljoo/code/candle` 로 이동 후 `make v2-all 2>&1 | tee v2-all.log`.
   - 실행 후 `v2-all_YYYY_MM_DD.log` 형태로 날짜 백업. 같은 날 여러 번 실행 시 `-1`, `-2` 번호 자동 부여.
 
-### dashboard group_returns.html — 신규 상장/데이터 부족 종목 표시
+### dashboard group_returns.html — 신규 상장/데이터 부족 종목 표시 (하단 섹션)
 - **사용자 요청** : `0190Y0`처럼 최근 상장되어 MA10M 계산(최소 200행)이 불가한 종목도 ETF_KR 등 그룹 페이지에 표시하되 이유를 설명해 달라. 매일 fetch가 쌓이면 자동으로 수익률 테이블로 이동.
 - **배경** : `0190Y0` (TIGER 구글밸류체인 ETF)는 2일치 데이터만 존재 → ma10m=NaN → backtest 신호 없음 → period_table 미포함.
 - **수정** (`render.py`)
@@ -702,3 +702,14 @@
   - 기존 수익률 테이블 아래 황색(amber) 섹션 신규 추가 (`{% if new_listings %}`).
   - 종목명, 보유 데이터(일수), 필요 데이터(200일), 진행률 바(%) 표시.
   - 200일 도달 시 자동으로 수익률 테이블에 포함됨을 안내.
+
+### dashboard group_returns.html — 종목명 표시 개선 + 데이터부족 뱃지 (수익률 테이블 내)
+- **사용자 요청** : 수익률 테이블에서 종목명이 너무 짧게 잘린다(10자). 2.5배(25자)로 늘리고 회색 대신 보라색으로 변경. 데이터가 부족한 종목에는 테이블 내에도 뱃지를 표시해 달라.
+- **수정** (`render.py`)
+  - instruments 순회 루프 1회로 통합: `ticker_rc: dict[str, int]` 구축 (모든 ticker CSV 행 수).
+  - `new_listings_by_group` 구성도 동일 루프에서 처리.
+  - `period_table` 각 행에 `data_lacking` (bool, row_count < 200), `row_count` (int) 필드 추가.
+- **수정** (`templates/group_returns.html`)
+  - 종목명 표시 길이: `row.name[:10]` → `row.name[:25]`.
+  - 종목명 색상: `text-slate-400` → `text-violet-600`.
+  - `data_lacking=True` 행에 주황색 인라인 뱃지 `데이터부족 N일` 표시 (수익률 테이블 종목 칸 내부).

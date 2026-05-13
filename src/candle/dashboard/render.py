@@ -94,31 +94,40 @@ def render(cfg: config.Config, on_date: date,
         g: [r for r in period_table if r["group_name"] == g] for g in groups
     }
 
-    # 데이터 부족 종목 감지 (instruments 에는 있지만 period_table 에 없는 종목)
+    # 데이터 부족 종목 감지
     # MA10M 계산에 최소 200행 필요 → 그 미만이면 "신규 상장 추정"으로 분류
     MA10M_MIN_ROWS = 200
     tickers_in_table: set[str] = {r["ticker"] for r in period_table}
+
+    # instruments 1회 순회 → ticker별 CSV 행 수 수집 + 신규상장(미포함) 리스트 구축
+    ticker_rc: dict[str, int] = {}
     new_listings_by_group: dict[str, list[dict]] = {g: [] for g in groups}
     if not inst.empty:
         for _, r in inst.iterrows():
             tk = str(r["ticker"])
             grp = str(r.get("group_name", ""))
-            if tk in tickers_in_table or grp not in groups:
-                continue
             market = str(r.get("market", "KR"))
             csv_path = paths.daily_csv(cfg.data_dir, market, tk)
-            row_count = 0
+            rc = 0
             if csv_path.exists():
                 try:
-                    row_count = sum(1 for _ in csv_path.open("r", encoding="utf-8")) - 1  # 헤더 제외
+                    rc = sum(1 for _ in csv_path.open("r", encoding="utf-8")) - 1  # 헤더 제외
                 except Exception:
                     pass
-            new_listings_by_group[grp].append({
-                "ticker": tk,
-                "name": str(r.get("name", tk)),
-                "row_count": row_count,
-                "needed": MA10M_MIN_ROWS,
-            })
+            ticker_rc[tk] = rc
+            if tk not in tickers_in_table and grp in groups:
+                new_listings_by_group[grp].append({
+                    "ticker": tk,
+                    "name": str(r.get("name", tk)),
+                    "row_count": rc,
+                    "needed": MA10M_MIN_ROWS,
+                })
+
+    # period_table 행에 data_lacking / row_count 필드 추가 (템플릿 뱃지 표시용)
+    for pt_row in period_table:
+        rc = ticker_rc.get(pt_row["ticker"], MA10M_MIN_ROWS)
+        pt_row["data_lacking"] = rc < MA10M_MIN_ROWS
+        pt_row["row_count"] = rc
 
     # ── 템플릿 렌더 ────────────────────────────────────────────────────────
     env = Environment(

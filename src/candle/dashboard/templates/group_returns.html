@@ -68,7 +68,10 @@
               <span class="mr-1 text-slate-400 text-xs"
                     x-text="open_ticker==='{{ row.ticker }}' ? '▼' : '▶'"></span>
               {{ row.ticker }}
-              <span class="text-xs text-slate-400 font-normal ml-1">{{ row.name[:10] }}</span>
+              <span class="text-xs text-violet-600 font-normal ml-1">{{ row.name[:25] }}</span>
+              {% if row.data_lacking %}
+              <span class="ml-1 px-1 py-0.5 text-[10px] font-normal bg-orange-100 text-orange-700 rounded border border-orange-300 whitespace-nowrap">데이터부족 {{ row.row_count }}일</span>
+              {% endif %}
             </td>
             <td class="px-3 py-2 text-xs text-slate-500">{{ row.group_name }}</td>
             {% if show_rank %}

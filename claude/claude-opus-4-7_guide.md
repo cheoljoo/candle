@@ -671,3 +671,14 @@ dashboard_site/data/
 - **동작**: `instruments.csv`에 있지만 `period_table`에 없는 종목 중 daily CSV 행수 < 200인 종목을 감지.
 - **표시**: 수익률 테이블 아래 amber 배경 섹션에 진행률 바(row_count / 200) 포함 표시.
 - **자동화**: 매일 `make v2-all` 수행 시 fetch → analyze → backtest가 누적되면 200행 도달 시점에 수익률 테이블로 자동 이동.
+
+---
+
+### 2026-05-13 변경 사항 (10차)
+
+#### group_returns.html — 종목명 표시 개선 + 데이터부족 뱃지
+- `render.py`: instruments 루프 1회 통합 → `ticker_rc` 맵 구축. `period_table` 행에 `data_lacking` / `row_count` 필드 추가.
+- `templates/group_returns.html`:
+  - 종목명 길이 `[:10]` → `[:25]` (2.5배 확장).
+  - 종목명 색상 `text-slate-400` → `text-violet-600` (보라색).
+  - `data_lacking=True` 행에 주황색 인라인 뱃지 `데이터부족 N일` 표시.
