@@ -713,3 +713,28 @@
   - 종목명 표시 길이: `row.name[:10]` → `row.name[:25]`.
   - 종목명 색상: `text-slate-400` → `text-violet-600`.
   - `data_lacking=True` 행에 주황색 인라인 뱃지 `데이터부족 N일` 표시 (수익률 테이블 종목 칸 내부).
+
+---
+
+## 2026-05-15
+
+### gmail_sender.py — 수신자 중복 제거
+- **배경** : `config/recipients.yml`의 `recipients` 목록에 `owner`(cheoljoo@gmail.com)가 중복 포함돼 있어 일반 발송 시 owner가 2통 수신.
+- **수정** (`gmail_sender.py` `main()`)
+  - `to_list = [owner] + [...]` 생성 후 `seen` 집합으로 순서를 유지하며 중복 제거.
+  - 제거된 수가 1 이상이면 `[mail] 중복 수신자 N명 제거됨` 로그 출력.
+
+### gmail_sender.py — HTML 이메일 발송 지원
+- **사용자 요청** : 메일 본문을 대시보드 홈처럼 HTML 형식으로 보내고 싶다.
+- **구현**
+  - `_build_html_body_from_decisions(decisions_json_path, dashboard_url) -> str` 신규 함수:
+    - 이메일 클라이언트 호환 **인라인 스타일 HTML** 생성 (CDN 불필요, table-based layout)
+    - 파란 헤더 + "대시보드 바로가기" 버튼
+    - 📈 BUY 신호 테이블 (초록 테두리·배경, 종목명/코드/그룹/순위/현재가/전략)
+    - 📉 SELL 신호 테이블 (빨강 테두리·배경)
+    - 전략 설명 테이블 + 푸터 (Candle 자동 발송 · 날짜 · 이메일)
+  - `_send_one()` 시그니처에 `html_body: str | None = None` 추가:
+    - `html_body` 있으면 `MIMEMultipart("mixed")` 안에 `MIMEMultipart("alternative")` 내포
+    - alternative 안에 plain text(폴백) + HTML 순서로 첨부 → 클라이언트가 HTML 미지원 시 plain 표시
+  - `main()` : `--decisions-json` 지정 시 plain body와 html body 동시 생성 후 `_send_one`에 전달.
+- **검증** : `uv run python gmail_sender.py --only-me --decisions-json dashboard_site/data/decisions.json` 로 owner에게 발송 — HTML 메일 정상 수신 확인.

@@ -128,6 +128,155 @@ def _build_body_from_decisions(decisions_json_path: str, dashboard_url: str) -> 
     return "\n".join(lines)
 
 
+def _build_html_body_from_decisions(decisions_json_path: str, dashboard_url: str) -> str:
+    """decisions.json 을 읽어 HTML 메일 본문 생성 (이메일 클라이언트 호환 인라인 스타일)."""
+    try:
+        with open(decisions_json_path, encoding="utf-8") as f:
+            decisions: list[dict] = json.load(f)
+    except Exception as e:
+        return f"<p>(의사결정 데이터 로드 실패: {e})</p>"
+
+    today_str = date.today().strftime("%Y-%m-%d")
+
+    filtered = [d for d in decisions if not d.get("source", "").startswith("rule:type3")]
+    buys  = [d for d in filtered if d.get("action") == "buy"]
+    sells = [d for d in filtered if d.get("action") == "sell"]
+
+    def _group_by_ticker(rows: list[dict]) -> dict[str, dict]:
+        out: dict[str, dict] = {}
+        for d in rows:
+            tk = d["ticker"]
+            if tk not in out:
+                out[tk] = {
+                    "name": d.get("name", ""),
+                    "group": d.get("group_name", ""),
+                    "rank": d.get("rank_in_group"),
+                    "price": d.get("price"),
+                    "types": [],
+                }
+            src = d.get("source", "")
+            if src.startswith("rule:"):
+                out[tk]["types"].append(src[5:])
+        return out
+
+    buy_map  = _group_by_ticker(buys)
+    sell_map = _group_by_ticker(sells)
+
+    def _ticker_rows_html(ticker_map: dict, action: str) -> str:
+        color = "#065f46" if action == "buy" else "#9f1239"
+        bg    = "#f0fdf4" if action == "buy" else "#fff1f2"
+        border= "#bbf7d0" if action == "buy" else "#fecdd3"
+        rows = []
+        for tk, info in sorted(ticker_map.items(), key=lambda x: (x[1]["group"], x[0])):
+            rank_str  = f" · 순위 {info['rank']}위" if info["rank"] else ""
+            price_str = f"{info['price']:,.0f}" if info["price"] else "-"
+            types_str = " · ".join(sorted(set(info["types"])))
+            rows.append(
+                f'<tr style="border-bottom:1px solid {border};">'
+                f'<td style="padding:8px 10px;font-weight:600;color:{color};">'
+                f'{info["name"]}<br><span style="font-weight:400;font-size:12px;color:#64748b;">'
+                f'{tk} | {info["group"]}{rank_str}</span></td>'
+                f'<td style="padding:8px 10px;text-align:right;color:{color};font-weight:600;">{price_str}</td>'
+                f'<td style="padding:8px 10px;font-size:12px;color:#475569;">{types_str}</td>'
+                f'</tr>'
+            )
+        return "".join(rows)
+
+    buy_rows  = _ticker_rows_html(buy_map,  "buy")
+    sell_rows = _ticker_rows_html(sell_map, "sell")
+
+    def _section_html(title: str, count: int, rows_html: str, action: str) -> str:
+        badge_bg  = "#dcfce7" if action == "buy" else "#ffe4e6"
+        badge_col = "#15803d" if action == "buy" else "#be123c"
+        head_bg   = "#f0fdf4" if action == "buy" else "#fff1f2"
+        if not rows_html:
+            return (f'<div style="margin-bottom:24px;">'
+                    f'<h2 style="font-size:16px;font-weight:700;margin:0 0 8px;">{title}</h2>'
+                    f'<p style="color:#94a3b8;font-size:13px;">신호 없음</p></div>')
+        return (
+            f'<div style="margin-bottom:24px;">'
+            f'<h2 style="font-size:16px;font-weight:700;margin:0 0 8px;">'
+            f'{title} '
+            f'<span style="background:{badge_bg};color:{badge_col};font-size:12px;'
+            f'padding:2px 8px;border-radius:9999px;font-weight:600;">{count}종목</span></h2>'
+            f'<table style="width:100%;border-collapse:collapse;font-size:13px;'
+            f'border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">'
+            f'<thead><tr style="background:{head_bg};">'
+            f'<th style="text-align:left;padding:8px 10px;color:#475569;">종목</th>'
+            f'<th style="text-align:right;padding:8px 10px;color:#475569;">현재가</th>'
+            f'<th style="text-align:left;padding:8px 10px;color:#475569;">전략</th>'
+            f'</tr></thead>'
+            f'<tbody>{rows_html}</tbody>'
+            f'</table></div>'
+        )
+
+    buy_section  = _section_html("📈 BUY 신호",  len(buy_map),  buy_rows,  "buy")
+    sell_section = _section_html("📉 SELL 신호", len(sell_map), sell_rows, "sell")
+
+    type_desc_rows = "".join(
+        f'<tr style="border-bottom:1px solid #f1f5f9;">'
+        f'<td style="padding:5px 10px;font-family:monospace;font-size:12px;color:#0f172a;'
+        f'white-space:nowrap;">{code}</td>'
+        f'<td style="padding:5px 10px;font-size:12px;color:#475569;">{desc}</td>'
+        f'</tr>'
+        for code, desc in _TYPE_DESC.items()
+    )
+
+    dashboard_btn = (
+        f'<a href="{dashboard_url}" style="display:inline-block;margin-top:4px;'
+        f'padding:8px 20px;background:#1e40af;color:#fff;text-decoration:none;'
+        f'border-radius:6px;font-size:13px;font-weight:600;">대시보드 바로가기 →</a>'
+    ) if dashboard_url else ""
+
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:ui-sans-serif,system-ui,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1e293b;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;">
+<tr><td align="center" style="padding:24px 16px;">
+<table width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden;">
+
+  <!-- Header -->
+  <tr><td style="background:#1e40af;padding:24px 28px;">
+    <div style="font-size:22px;font-weight:700;color:#fff;">🕯️ Candle 투자 리포트</div>
+    <div style="font-size:13px;color:#bfdbfe;margin-top:4px;">기준일 {today_str}</div>
+    {f'<div style="margin-top:12px;">{dashboard_btn}</div>' if dashboard_url else ""}
+  </td></tr>
+
+  <!-- Body -->
+  <tr><td style="padding:24px 28px;">
+    {buy_section}
+    {sell_section}
+
+    <!-- 전략 설명 -->
+    <div style="margin-top:8px;">
+      <h3 style="font-size:14px;font-weight:600;color:#475569;margin:0 0 8px;">전략 설명</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">
+        <tbody>{type_desc_rows}</tbody>
+      </table>
+    </div>
+
+    <p style="margin-top:20px;font-size:12px;color:#94a3b8;">
+      * type3(적립식) 신호는 요약에서 제외됩니다.<br>
+      * 상세 내용은 대시보드에서 확인하세요.
+    </p>
+  </td></tr>
+
+  <!-- Footer -->
+  <tr><td style="background:#f1f5f9;padding:14px 28px;border-top:1px solid #e2e8f0;">
+    <p style="margin:0;font-size:11px;color:#94a3b8;">
+      Candle 자동 발송 · {today_str} · 문의: cheoljoo@gmail.com
+    </p>
+  </td></tr>
+
+</table>
+</td></tr>
+</table>
+</body></html>"""
+
+    return html
+
+
 # ── 메일 발송 ─────────────────────────────────────────────────────────────────
 def _send_one(
     sender_email: str,
@@ -136,14 +285,22 @@ def _send_one(
     subject: str,
     body: str,
     attachment_path: str | None,
+    html_body: str | None = None,
 ) -> bool:
-    """수신자 1인에게 메일 발송. 성공 True, 실패 False."""
+    """수신자 1인에게 메일 발송. html_body 가 있으면 multipart/alternative 로 발송."""
     try:
-        msg = MIMEMultipart()
+        msg = MIMEMultipart("mixed")
         msg["From"] = sender_email
         msg["To"] = to_email
         msg["Subject"] = subject
-        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        if html_body:
+            alt = MIMEMultipart("alternative")
+            alt.attach(MIMEText(body, "plain", "utf-8"))
+            alt.attach(MIMEText(html_body, "html", "utf-8"))
+            msg.attach(alt)
+        else:
+            msg.attach(MIMEText(body, "plain", "utf-8"))
 
         if attachment_path and os.path.exists(attachment_path):
             with open(attachment_path, "rb") as f:
@@ -196,8 +353,10 @@ def main():
     sender_password = "dytf xplz hjea dhwj"  # Gmail app-specific password
 
     # ── 본문 결정 ──────────────────────────────────────────────────────────
+    html_body: str | None = None
     if args.decisions_json:
         body = _build_body_from_decisions(args.decisions_json, dashboard_url)
+        html_body = _build_html_body_from_decisions(args.decisions_json, dashboard_url)
     elif args.body_file and os.path.exists(args.body_file):
         with open(args.body_file, encoding="utf-8") as f:
             body = f.read().strip()
@@ -209,15 +368,20 @@ def main():
         to_list = [owner]
         print(f"[mail] --only-me: {owner} 에게만 발송")
     else:
-        to_list = [owner] + [r["email"] for r in recipients if r.get("email")]
-        print(f"[mail] 수신자 {len(to_list)}명: {owner} + {len(recipients)}명")
+        raw_list = [owner] + [r["email"] for r in recipients if r.get("email")]
+        seen = set()
+        to_list = [e for e in raw_list if not (e in seen or seen.add(e))]
+        removed = len(raw_list) - len(to_list)
+        if removed:
+            print(f"[mail] 중복 수신자 {removed}명 제거됨")
+        print(f"[mail] 수신자 {len(to_list)}명: {owner} + {len(recipients)}명 (중복 제거 후)")
 
     # ── 개별 발송 ──────────────────────────────────────────────────────────
     ok = fail = 0
     for to_email in to_list:
         print(f"[mail]   → {to_email} ...", end=" ", flush=True)
         if _send_one(sender_email, sender_password, to_email,
-                     args.subject, body, args.attach_file):
+                     args.subject, body, args.attach_file, html_body):
             print("OK")
             ok += 1
         else:
