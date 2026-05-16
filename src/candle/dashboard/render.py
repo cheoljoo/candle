@@ -129,11 +129,34 @@ def render(cfg: config.Config, on_date: date,
         pt_row["data_lacking"] = rc < MA10M_MIN_ROWS
         pt_row["row_count"] = rc
 
+    # ── 시장 시그널 (프로그램 비차익 + 금융투자) ───────────────────────────
+    tprint("[dashboard] 시장 시그널 로딩...", flush=True)
+    t0 = time.perf_counter()
+    market_signal_ctx = _load_market_signals(cfg, on_date)
+    tprint(f"[dashboard] 시장 시그널 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
     # ── 템플릿 렌더 ────────────────────────────────────────────────────────
+    def _uk_fmt(value: object) -> str:
+        """억 단위 숫자를 '3조 3664억' 형태로 변환."""
+        try:
+            v = int(value)
+        except (TypeError, ValueError):
+            return str(value)
+        neg = v < 0
+        av = abs(v)
+        if av >= 10_000:
+            jo = av // 10_000
+            uk = av % 10_000
+            result = f"{jo:,}조 {uk:,}억" if uk else f"{jo:,}조"
+        else:
+            result = f"{av:,}억"
+        return f"-{result}" if neg else result
+
     env = Environment(
         loader=FileSystemLoader(str(Path(__file__).parent / "templates")),
         autoescape=select_autoescape(["html"]),
     )
+    env.filters["uk_fmt"] = _uk_fmt
 
     # 전략 type 이름 설명 (모든 페이지 공통)
     type_descriptions = {
@@ -167,6 +190,7 @@ def render(cfg: config.Config, on_date: date,
         type_descriptions=type_descriptions,
         name_map=name_map,
         period_table_by_ticker=period_table_by_ticker,
+        market_signals=market_signal_ctx,
     )
 
     # index.html
@@ -244,6 +268,13 @@ def render(cfg: config.Config, on_date: date,
     n_all = len(opt_data.get("all", []))
     tprint(f"[dashboard] optimize.html 완료 — 전체 {n_all}개 조합 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
+    # market_signals.html
+    tprint("[dashboard] market_signals.html 렌더...", flush=True)
+    t0 = time.perf_counter()
+    ms_tpl = env.get_template("market_signals.html")
+    (out_dir / "market_signals.html").write_text(ms_tpl.render(**common_ctx), encoding="utf-8")
+    tprint(f"[dashboard] market_signals.html 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
     # 사이드 JSON
     tprint("[dashboard] JSON 산출물 저장...", flush=True)
     t0 = time.perf_counter()
@@ -266,7 +297,7 @@ def render(cfg: config.Config, on_date: date,
 
     return {
         "out": str(out_dir / "index.html"),
-        "pages": 10,
+        "pages": 11,
         "decisions": len(decisions),
         "compare_periods": len(compare_period_list),
         "inflections": len(inflections),
@@ -706,3 +737,151 @@ def _json_default(o):
     if isinstance(o, (pd.Timestamp,)):
         return o.isoformat()
     raise TypeError(f"not serializable: {type(o)}")
+
+
+def _load_market_signals(cfg: config.Config, on_date: date) -> dict:
+    """프로그램 비차익 + 금융투자 시장 시그널 로딩 (dashboard용).
+
+    data/market/program_trading.csv, investor_trading.csv 에서 읽어
+    최근 1개월(테이블) + 3개월(차트) 데이터를 반환.
+    파일이 없으면 빈 구조 반환 (dashboard graceful degradation).
+    """
+    from ..fetch import market_signals as ms
+
+    market_dir = cfg.data_dir / "market"
+    prog_path = market_dir / "program_trading.csv"
+    inv_path  = market_dir / "investor_trading.csv"
+
+    # 파일이 없으면 빈 컨텍스트 반환 (make v2-market-signals 미실행 상태)
+    prog_df = pd.read_csv(prog_path) if prog_path.exists() else pd.DataFrame()
+    inv_df  = pd.read_csv(inv_path)  if inv_path.exists()  else pd.DataFrame()
+    kospi_path = market_dir / "kospi_index.csv"
+    kospi_df = pd.read_csv(kospi_path) if kospi_path.exists() else pd.DataFrame()
+
+    signals = ms.check_signals(prog_df, inv_df, kospi_df=kospi_df, as_of=on_date)
+
+    today_str = on_date.strftime("%Y-%m-%d")
+    prog_thr = signals.get("program_threshold", 0)
+    inv_thr  = signals.get("finv_threshold", 0)
+    kospi_lookup: dict = signals.get("kospi_data", {})
+
+    # ── 프로그램 비차익 ─────────────────────────────────────────────────
+    prog_max_sell = signals.get("program_max_sell", 0)   # 역사적 최대 순매도 (가장 음수)
+    prog_max_억 = round(prog_max_sell / 1e8, 0) if prog_max_sell else 0
+
+    # 차트용 3개월(약 63거래일) — 최신이 오른쪽
+    prog_chart_3m: list[dict] = []
+    if not prog_df.empty and "비차익_순매수" in prog_df.columns:
+        c3 = prog_df[prog_df["date"] <= today_str].tail(63)
+        abs_max = abs(c3["비차익_순매수"].min()) if not c3.empty else 1
+        for _, r in c3.iterrows():
+            val = int(r["비차익_순매수"])
+            height = round(abs(val) / abs_max * 100, 1) if abs_max else 0
+            max_ratio = round(val / prog_max_sell * 100, 1) if prog_max_sell else 0
+            prog_chart_3m.append({
+                "date": r["date"],
+                "val_억": round(val / 1e8, 0),
+                "height_pct": height,
+                "max_ratio": max_ratio,
+                "alert": val <= prog_thr,
+                "kospi_close": kospi_lookup.get(r["date"]),
+                "kospi_y_pct": None,  # 이후 정규화
+            })
+
+    # KOSPI 선 정규화: 차트 창 내 10~90% 범위
+    _kc = [d["kospi_close"] for d in prog_chart_3m if d["kospi_close"] is not None]
+    if _kc:
+        _kmin, _kmax = min(_kc), max(_kc)
+        _kr = (_kmax - _kmin) or 1
+        for _d in prog_chart_3m:
+            if _d["kospi_close"] is not None:
+                _d["kospi_y_pct"] = round((_d["kospi_close"] - _kmin) / _kr * 80 + 10, 1)
+
+    # 테이블용 1개월(약 21거래일) — 최신이 맨 위
+    prog_table: list[dict] = []
+    if not prog_df.empty and "비차익_순매수" in prog_df.columns:
+        t1 = prog_df[prog_df["date"] <= today_str].tail(21)
+        for _, r in t1.iloc[::-1].iterrows():
+            val = int(r["비차익_순매수"])
+            max_ratio = round(val / prog_max_sell * 100, 1) if prog_max_sell else 0
+            prog_table.append({
+                "date": r["date"],
+                "val_억": round(val / 1e8, 0),
+                "max_억": prog_max_억,
+                "max_ratio": max_ratio,
+                "alert": val <= prog_thr,
+                "kospi_close": kospi_lookup.get(r["date"]),
+            })
+
+    # ── 금융투자 ────────────────────────────────────────────────────────
+    inv_max_sell = signals.get("finv_max_sell", 0)
+    inv_max_억 = round(inv_max_sell / 1e8, 0) if inv_max_sell else 0
+
+    inv_chart_3m: list[dict] = []
+    if not inv_df.empty and "금융투자" in inv_df.columns:
+        c3i = inv_df[inv_df["date"] <= today_str].tail(63)
+        abs_max_i = abs(c3i["금융투자"].min()) if not c3i.empty else 1
+        for _, r in c3i.iterrows():
+            val_i = int(r["금융투자"])
+            height_i = round(abs(val_i) / abs_max_i * 100, 1) if abs_max_i else 0
+            max_ratio_i = round(val_i / inv_max_sell * 100, 1) if inv_max_sell else 0
+            inv_chart_3m.append({
+                "date": r["date"],
+                "val_억": round(val_i / 1e8, 0),
+                "height_pct": height_i,
+                "max_ratio": max_ratio_i,
+                "alert": val_i <= inv_thr,
+                "kospi_close": kospi_lookup.get(r["date"]),
+                "kospi_y_pct": None,
+            })
+
+    _kci = [d["kospi_close"] for d in inv_chart_3m if d["kospi_close"] is not None]
+    if _kci:
+        _kimin, _kimax = min(_kci), max(_kci)
+        _kir = (_kimax - _kimin) or 1
+        for _di in inv_chart_3m:
+            if _di["kospi_close"] is not None:
+                _di["kospi_y_pct"] = round((_di["kospi_close"] - _kimin) / _kir * 80 + 10, 1)
+
+    inv_table: list[dict] = []
+    if not inv_df.empty and "금융투자" in inv_df.columns:
+        t1i = inv_df[inv_df["date"] <= today_str].tail(21)
+        for _, r in t1i.iloc[::-1].iterrows():
+            val_i = int(r["금융투자"])
+            max_ratio_i = round(val_i / inv_max_sell * 100, 1) if inv_max_sell else 0
+            inv_table.append({
+                "date": r["date"],
+                "val_억": round(val_i / 1e8, 0),
+                "max_억": inv_max_억,
+                "max_ratio": max_ratio_i,
+                "alert": val_i <= inv_thr,
+                "kospi_close": kospi_lookup.get(r["date"]),
+            })
+
+    prog_stats = signals.get("stats", {}).get("program", {})
+
+    return {
+        "available": not prog_df.empty,
+        "program_signal": signals["program_signal"],
+        "finv_signal": signals["finv_signal"],
+        "any_signal": signals["program_signal"] or signals["finv_signal"],
+        "signals": signals["signals"],
+        "program_value_억": round(signals["program_value"] / 1e8, 0) if signals["program_value"] else 0,
+        "program_threshold_억": round(prog_thr / 1e8, 0),
+        "program_max_억": prog_max_억,
+        "program_max_ratio": signals.get("program_max_ratio", 0),
+        "program_pct_rank": signals.get("program_pct_rank", 50),
+        "finv_value_억": round(signals["finv_value"] / 1e8, 0) if signals["finv_value"] else 0,
+        "finv_threshold_억": round(inv_thr / 1e8, 0),
+        "finv_max_억": inv_max_억,
+        "finv_max_ratio": signals.get("finv_max_ratio", 0),
+        "finv_consec": signals["finv_consec"],
+        "lookback_days": prog_stats.get("lookback_days", 0),
+        "prog_kospi_corr": signals.get("prog_kospi_corr"),
+        "finv_kospi_corr": signals.get("finv_kospi_corr"),
+        "prog_chart_3m": prog_chart_3m,
+        "prog_table": prog_table,
+        "inv_chart_3m": inv_chart_3m,
+        "inv_table": inv_table,
+    }
+

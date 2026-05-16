@@ -22,6 +22,7 @@ SENDMAIL ?= YES
         v2-mail v2-mail-me \
         v2-optimize \
         v2-gmail-etf v2-gmail-etf-dry \
+        v2-market-signals \
         v2-smoke v2-all
 
 # ── 도움말 ────────────────────────────────────────────────────────────────────
@@ -57,6 +58,9 @@ help:
 	@echo ""
 	@echo "파라미터 최적화 (v2-all 미포함 — 수동 실행):"
 	@echo "  make v2-optimize                    - plus 4~40 step2 × minus 4~10 step2 = 76조합"
+	@echo ""
+	@echo "시장 시그널 (수동 실행):"
+	@echo "  make v2-market-signals              - 프로그램 비차익 순매도 + 금융투자 연속 순매도 확인 (증분 포집)"
 	@echo ""
 	@echo "기타:"
 	@echo "  make v2-smoke                       - 소규모 universe로 전체 파이프라인 검증"
@@ -199,7 +203,8 @@ v2-dashboard:
 # SENDMAIL=YES 설정 시 완료 후 전체 수신자에게 메일 발송
 # 예) make v2-all SENDMAIL=YES
 #     make v2-all DEBUG=--debug SENDMAIL=YES
-v2-all: v2-gmail-etf v2-universe v2-fetch-full v2-analyze v2-backtest v2-simulate v2-dashboard
+v2-all: v2-gmail-etf v2-universe v2-fetch-full v2-analyze v2-backtest v2-simulate v2-market-signals v2-dashboard v2-sendmail
+v2-sendmail:
 	uv run python -u gmail_sender.py \
 		--sendmail "$(SENDMAIL)" \
 		--subject="[candle][v2] $$(date +%Y-%m-%d) 투자 리포트" \
@@ -229,6 +234,11 @@ v2-gmail-etf:
 
 v2-gmail-etf-dry:
 	uv run candle gmail-etf --dry-run $(DEBUG)
+
+# ── market-signals (프로그램/투자자 매매 시그널) ──────────────────────────────
+v2-market-signals:
+	set -o pipefail; uv run candle market-signals $(DEBUG) | tee v2-market-signals.log
+	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) market-signals" --body-file="./v2-market-signals.log" --only-me --sendmail "$(SENDMAIL)"
 
 # ── smoke (소규모 universe 빠른 검증) ─────────────────────────────────────────
 v2-smoke:

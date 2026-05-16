@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕯️</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>시장 시그널 — Candle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+    .pill { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="border-b bg-white">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold">시장 시그널 <span class="pill bg-blue-100 text-blue-700 ml-1">🇰🇷 KR</span></h1>
+      <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+      <p class="text-xs text-slate-400 mt-0.5">KOSPI 프로그램/투자자 매매 · 역사적 퍼센타일 기반 시그널</p>
+    </div>
+    <a href="index.html" class="text-sm text-slate-500 hover:underline">← 홈으로</a>
+  </div>
+</header>
+
+{% include "_nav.html" %}
+
+<main class="max-w-7xl mx-auto p-4 space-y-6">
+
+{% if market_signals and market_signals.available %}
+
+  {# ── 활성 경보 배너 ─────────────────────────────────────────────────── #}
+  {% if market_signals.any_signal %}
+  <div class="p-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 space-y-1">
+    <div class="font-semibold mb-1">⚠ 시그널 활성</div>
+    {% for msg in market_signals.signals %}
+    <div class="flex items-start gap-2 text-sm"><span class="mt-0.5">•</span><span>{{ msg }}</span></div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="p-3 rounded bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm">
+    ✓ 현재 ETF 기계적 매도 시그널 없음 (역사적 {{ market_signals.lookback_days }}거래일 기준)
+  </div>
+  {% endif %}
+
+  {# ── 요약 카드 ───────────────────────────────────────────────────────── #}
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    {# 프로그램 비차익 #}
+    {% if market_signals.prog_table %}
+    {% set tp = market_signals.prog_table[0] %}
+    <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 {% if market_signals.program_signal %}border-rose-400{% else %}border-slate-200{% endif %}">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-semibold text-slate-700">프로그램 비차익 순매수</span>
+        {% if market_signals.program_signal %}
+        <span class="pill bg-rose-100 text-rose-700">⚠ 하위 {{ market_signals.program_pct_rank | round(1) }}%</span>
+        {% endif %}
+      </div>
+      <div class="text-3xl font-bold {% if tp.alert %}text-rose-700{% elif tp.val_억 < 0 %}text-slate-700{% else %}text-emerald-700{% endif %} mb-1">
+        {{ tp.val_억 | uk_fmt }}
+      </div>
+      <div class="text-xs text-slate-400 space-y-0.5">
+        <div>경보 기준: {{ market_signals.program_threshold_억 | uk_fmt }} 이하</div>
+        <div>역사적 MAX: {{ market_signals.program_max_억 | uk_fmt }}</div>
+        <div>MAX 대비: <span class="{% if tp.max_ratio > 80 %}text-rose-600 font-semibold{% elif tp.max_ratio > 50 %}text-amber-600{% endif %}">{{ tp.max_ratio | round(1) }}%</span></div>
+        <div>기준일: {{ tp.date }}</div>
+      </div>
+    </div>
+    {% endif %}
+
+    {# 금융투자 #}
+    {% if market_signals.inv_table %}
+    {% set ti = market_signals.inv_table[0] %}
+    <div class="bg-white rounded-lg shadow-sm p-4 border-l-4 {% if market_signals.finv_signal %}border-rose-400{% else %}border-slate-200{% endif %}">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-semibold text-slate-700">금융투자 순매수</span>
+        {% if market_signals.finv_signal %}
+        <span class="pill bg-rose-100 text-rose-700">⚠ {{ market_signals.finv_consec }}일 연속</span>
+        {% elif market_signals.finv_consec > 0 %}
+        <span class="pill bg-amber-100 text-amber-700">{{ market_signals.finv_consec }}일 연속</span>
+        {% endif %}
+      </div>
+      <div class="text-3xl font-bold {% if ti.alert %}text-rose-700{% elif ti.val_억 < 0 %}text-slate-700{% else %}text-emerald-700{% endif %} mb-1">
+        {{ ti.val_억 | uk_fmt }}
+      </div>
+      <div class="text-xs text-slate-400 space-y-0.5">
+        <div>경보 기준: {{ market_signals.finv_threshold_억 | uk_fmt }} 이하 × 3일 연속</div>
+        <div>역사적 MAX: {{ market_signals.finv_max_억 | uk_fmt }}</div>
+        <div>MAX 대비: <span class="{% if ti.max_ratio > 80 %}text-rose-600 font-semibold{% elif ti.max_ratio > 50 %}text-amber-600{% endif %}">{{ ti.max_ratio | round(1) }}%</span></div>
+        <div>기준일: {{ ti.date }}</div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── 용어 설명 ─────────────────────────────────────────────────────── #}
+  <details class="bg-white rounded-lg shadow-sm" open>
+    <summary class="px-4 py-3 cursor-pointer font-semibold text-slate-700 select-none flex items-center gap-2">
+      <span>📖 지표 설명 — 프로그램 비차익 순매수 &amp; 금융투자 순매수</span>
+      <span class="ml-auto text-xs text-slate-400 font-normal">접기/펼치기</span>
+    </summary>
+    <div class="px-4 pb-4 grid grid-cols-1 xl:grid-cols-2 gap-4 text-sm text-slate-600">
+
+      {# 프로그램 비차익 #}
+      <div class="space-y-2">
+        <h3 class="font-semibold text-slate-800 flex items-center gap-1">
+          <span class="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-400"></span>
+          프로그램 비차익 순매수
+        </h3>
+        <p>
+          <strong>프로그램 매매</strong>란 컴퓨터 알고리즘이 여러 종목을 묶음(바스켓)으로 동시에 사고파는 거래 방식입니다.
+          그 중 <strong>비차익(非差益) 거래</strong>는 지수 선물과 현물 간 가격 차이를 이용한 차익 거래와 달리,
+          헤지펀드·ETF 운용·포트폴리오 리밸런싱 등 순수 포지션 변경 목적으로 이뤄지는 대규모 바스켓 매매입니다.
+        </p>
+        <ul class="list-disc list-inside space-y-1 text-xs text-slate-500">
+          <li><strong>순매수 (양수, 초록)</strong>: 기관이 시장에 매수 압력을 가하는 상태 → 통상 KOSPI 지지</li>
+          <li><strong>순매도 (음수, 빨강)</strong>: 대규모 현물 팔기 → KOSPI 하락 압력</li>
+          <li><strong>경보 기준</strong>: 최근 {{ market_signals.lookback_days }}거래일 역사적 분포의 하위 10% — 즉 극단적으로 큰 매도가 나올 때 시그널 발생</li>
+          <li>외국인의 ETF 환매·대규모 리밸런싱이 빈번히 반영되어, 시장 충격을 선행하는 경향이 있음</li>
+        </ul>
+        <p class="text-xs text-slate-400 bg-slate-50 rounded p-2">
+          📌 출처: KRX 정보데이터시스템 <code>MDCSTAT02601</code> (프로그램매매 동향) — 비차익 매도·매수 합산 후 순매수 계산
+        </p>
+      </div>
+
+      {# 금융투자 #}
+      <div class="space-y-2">
+        <h3 class="font-semibold text-slate-800 flex items-center gap-1">
+          <span class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-400"></span>
+          금융투자 순매수
+        </h3>
+        <p>
+          <strong>금융투자</strong>는 증권사·자산운용사·투자은행 등 전문 금융기관의 자기계정(고유계정) 매매를 집계한 투자자 유형입니다.
+          KOSPI 시장에서 가장 정보력이 높고 자본력이 큰 주체로,
+          단기 방향성 베팅과 헤지 목적 매매를 모두 포함합니다.
+        </p>
+        <ul class="list-disc list-inside space-y-1 text-xs text-slate-500">
+          <li><strong>연속 순매도</strong>가 3일 이상 지속되면 기관의 리스크 축소 신호로 해석</li>
+          <li>경보 기준: 역사적 하위 10% 강도로 <strong>3거래일 연속</strong> 순매도 시 발동</li>
+          <li>단일 이벤트성 대형 매도보다 <strong>지속성</strong>이 더 중요한 지표</li>
+          <li>프로그램 비차익과 동시 경보 시 시장 위험 수준이 크게 높아짐</li>
+        </ul>
+        <p class="text-xs text-slate-400 bg-slate-50 rounded p-2">
+          📌 출처: pykrx 투자자별 매매 동향 (금융투자 = 증권사·자산운용·투자은행 자기계정 합산)
+        </p>
+      </div>
+
+    </div>
+  </details>
+
+  {# ── 3개월 차트 + 1개월 테이블 ────────────────────────────────────────── #}
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+    {# ── 프로그램 비차익 ─────────────────────────────────────────────── #}
+    <div class="bg-white rounded-lg shadow-sm p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="font-semibold text-slate-700">프로그램 비차익 순매수</span>
+        {% if market_signals.program_signal %}
+        <span class="pill bg-rose-100 text-rose-700">⚠ 하위 {{ market_signals.program_pct_rank | round(1) }}%</span>
+        {% endif %}
+        <span class="text-xs text-slate-400">경보: {{ market_signals.program_threshold_억 | uk_fmt }}↓</span>
+      </div>
+
+      {# 3개월 막대+KOSPI 켽은선 SVG 차트 #}
+      <div class="mb-4">
+        <div class="text-xs text-slate-400 mb-1">3개월 추이 &nbsp;<span class="inline-block w-3 h-2 bg-slate-300 rounded-sm align-middle"></span> 순매도 &nbsp;<span class="inline-block w-4 border-t-2 border-blue-500 align-middle"></span> KOSPI 지수</div>
+        <svg class="w-full h-24 block" viewBox="0 0 {{ market_signals.prog_chart_3m | length }} 100" preserveAspectRatio="none">
+          {% for d in market_signals.prog_chart_3m %}
+          <rect x="{{ loop.index0 + 0.05 }}" y="{{ (100 - [d.height_pct, 3] | max) | round(1) }}"
+                width="0.9" height="{{ [d.height_pct, 3] | max | round(1) }}"
+                fill="{% if d.alert %}#f87171{% elif d.val_억 < 0 %}#94a3b8{% else %}#6ee7b7{% endif %}">
+            <title>{{ d.date }}: {{ d.val_억 | uk_fmt }} | KOSPI {{ '{:,.0f}'.format(d.kospi_close) if d.kospi_close else '-' }}</title>
+          </rect>
+          {% endfor %}
+          {% set has_k = market_signals.prog_chart_3m | selectattr('kospi_y_pct') | list | length > 0 %}
+          {% if has_k %}
+          <polyline
+            points="{% for d in market_signals.prog_chart_3m %}{% if d.kospi_y_pct is not none %}{{ loop.index0 + 0.5 }},{{ (100 - d.kospi_y_pct) | round(1) }} {% endif %}{% endfor %}"
+            fill="none" stroke="#3b82f6" stroke-width="0.8" />
+          {% endif %}
+        </svg>
+        <div class="flex justify-between text-xs text-slate-400 mt-0.5">
+          <span>← 3개월 전</span><span>오늘 →</span>
+        </div>
+      </div>
+
+      {# 상관관계 #}
+      {% if market_signals.prog_kospi_corr is not none %}
+      <div class="mb-3 text-xs">
+        <span class="text-slate-500">KOSPI 상관계수 (Pearson r):</span>
+        <span class="font-bold ml-1
+          {% set r = market_signals.prog_kospi_corr %}
+          {% if r | abs > 0.7 %}text-blue-700{% elif r | abs > 0.4 %}text-blue-500{% else %}text-slate-500{% endif %}">
+          {{ '%+.3f' | format(market_signals.prog_kospi_corr) }}
+        </span>
+        <span class="text-slate-400 ml-1">
+          (— {% if market_signals.prog_kospi_corr | abs > 0.7 %}상관성 강함{% elif market_signals.prog_kospi_corr | abs > 0.4 %}상관성 중간{% else %}상관성 약함{% endif %},
+          {% if market_signals.prog_kospi_corr > 0 %}양의 상관: 순매수↑ → KOSPI↑{% else %}음의 상관: 순매도↑ → KOSPI↓{% endif %})
+        </span>
+      </div>
+      {% endif %}
+
+      {# 1개월 테이블 #}
+      <div class="text-xs text-slate-400 mb-1">1개월 상세 (최신순)</div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-slate-50 text-slate-500">
+            <tr>
+              <th class="text-left px-2 py-1.5">날짜</th>
+              <th class="text-right px-2 py-1.5">순매수</th>
+              <th class="text-right px-2 py-1.5">역사MAX</th>
+              <th class="text-right px-2 py-1.5">MAX비율(%)</th>
+              <th class="text-right px-2 py-1.5">KOSPI</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in market_signals.prog_table %}
+            <tr class="border-t {% if d.alert %}bg-rose-50{% endif %}">
+              <td class="px-2 py-1.5 font-mono {% if loop.first %}font-semibold{% endif %}">{{ d.date }}</td>
+              <td class="px-2 py-1.5 text-right tabular-nums {% if d.alert %}text-rose-700 font-bold{% elif d.val_억 < 0 %}text-slate-600{% else %}text-emerald-600{% endif %}">
+                {{ d.val_억 | uk_fmt }}
+              </td>
+              <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{{ d.max_억 | uk_fmt }}</td>
+              <td class="px-2 py-1.5 text-right tabular-nums {% if d.max_ratio > 80 %}text-rose-600 font-semibold{% elif d.max_ratio > 50 %}text-amber-600{% else %}text-slate-500{% endif %}">
+                {{ d.max_ratio | round(1) }}
+              </td>
+              <td class="px-2 py-1.5 text-right tabular-nums text-slate-500">
+                {{ '{:,.0f}'.format(d.kospi_close) if d.kospi_close else '—' }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# ── 금융투자 ──────────────────────────────────────────────────────── #}
+    <div class="bg-white rounded-lg shadow-sm p-4">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="font-semibold text-slate-700">금융투자 순매수</span>
+        {% if market_signals.finv_signal %}
+        <span class="pill bg-rose-100 text-rose-700">⚠ {{ market_signals.finv_consec }}일 연속</span>
+        {% elif market_signals.finv_consec > 0 %}
+        <span class="pill bg-amber-100 text-amber-700">{{ market_signals.finv_consec }}일 연속</span>
+        {% endif %}
+        <span class="text-xs text-slate-400">경보: {{ market_signals.finv_threshold_억 | uk_fmt }}↓ × 3일</span>
+      </div>
+
+      {# 3개월 막대+KOSPI 켽은선 SVG 차트 #}
+      <div class="mb-4">
+        <div class="text-xs text-slate-400 mb-1">3개월 추이 &nbsp;<span class="inline-block w-3 h-2 bg-slate-300 rounded-sm align-middle"></span> 순매도 &nbsp;<span class="inline-block w-4 border-t-2 border-blue-500 align-middle"></span> KOSPI 지수</div>
+        <svg class="w-full h-24 block" viewBox="0 0 {{ market_signals.inv_chart_3m | length }} 100" preserveAspectRatio="none">
+          {% for d in market_signals.inv_chart_3m %}
+          <rect x="{{ loop.index0 + 0.05 }}" y="{{ (100 - [d.height_pct, 3] | max) | round(1) }}"
+                width="0.9" height="{{ [d.height_pct, 3] | max | round(1) }}"
+                fill="{% if d.alert %}#f87171{% elif d.val_억 < 0 %}#94a3b8{% else %}#6ee7b7{% endif %}">
+            <title>{{ d.date }}: {{ d.val_억 | uk_fmt }} | KOSPI {{ '{:,.0f}'.format(d.kospi_close) if d.kospi_close else '-' }}</title>
+          </rect>
+          {% endfor %}
+          {% set has_ki = market_signals.inv_chart_3m | selectattr('kospi_y_pct') | list | length > 0 %}
+          {% if has_ki %}
+          <polyline
+            points="{% for d in market_signals.inv_chart_3m %}{% if d.kospi_y_pct is not none %}{{ loop.index0 + 0.5 }},{{ (100 - d.kospi_y_pct) | round(1) }} {% endif %}{% endfor %}"
+            fill="none" stroke="#3b82f6" stroke-width="0.8" />
+          {% endif %}
+        </svg>
+        <div class="flex justify-between text-xs text-slate-400 mt-0.5">
+          <span>← 3개월 전</span><span>오늘 →</span>
+        </div>
+      </div>
+
+      {# 상관관계 #}
+      {% if market_signals.finv_kospi_corr is not none %}
+      <div class="mb-3 text-xs">
+        <span class="text-slate-500">KOSPI 상관계수 (Pearson r):</span>
+        <span class="font-bold ml-1
+          {% if market_signals.finv_kospi_corr | abs > 0.7 %}text-blue-700{% elif market_signals.finv_kospi_corr | abs > 0.4 %}text-blue-500{% else %}text-slate-500{% endif %}">
+          {{ '%+.3f' | format(market_signals.finv_kospi_corr) }}
+        </span>
+        <span class="text-slate-400 ml-1">
+          (— {% if market_signals.finv_kospi_corr | abs > 0.7 %}상관성 강함{% elif market_signals.finv_kospi_corr | abs > 0.4 %}상관성 중간{% else %}상관성 약함{% endif %},
+          {% if market_signals.finv_kospi_corr > 0 %}양의 상관: 순매수↑ → KOSPI↑{% else %}음의 상관: 순매도↑ → KOSPI↓{% endif %})
+        </span>
+      </div>
+      {% endif %}
+
+      {# 1개월 테이블 #}
+      <div class="text-xs text-slate-400 mb-1">1개월 상세 (최신순)</div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-slate-50 text-slate-500">
+            <tr>
+              <th class="text-left px-2 py-1.5">날짜</th>
+              <th class="text-right px-2 py-1.5">순매수</th>
+              <th class="text-right px-2 py-1.5">역사MAX</th>
+              <th class="text-right px-2 py-1.5">MAX비율(%)</th>
+              <th class="text-right px-2 py-1.5">KOSPI</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in market_signals.inv_table %}
+            <tr class="border-t {% if d.alert %}bg-rose-50{% endif %}">
+              <td class="px-2 py-1.5 font-mono {% if loop.first %}font-semibold{% endif %}">{{ d.date }}</td>
+              <td class="px-2 py-1.5 text-right tabular-nums {% if d.alert %}text-rose-700 font-bold{% elif d.val_억 < 0 %}text-slate-600{% else %}text-emerald-600{% endif %}">
+                {{ d.val_억 | uk_fmt }}
+              </td>
+              <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{{ d.max_억 | uk_fmt }}</td>
+              <td class="px-2 py-1.5 text-right tabular-nums {% if d.max_ratio > 80 %}text-rose-600 font-semibold{% elif d.max_ratio > 50 %}text-amber-600{% else %}text-slate-500{% endif %}">
+                {{ d.max_ratio | round(1) }}
+              </td>
+              <td class="px-2 py-1.5 text-right tabular-nums text-slate-500">
+                {{ '{:,.0f}'.format(d.kospi_close) if d.kospi_close else '—' }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>{# end grid #}
+
+  {# ── 상관관계 분석 ─────────────────────────────────────────────────── #}
+  {% if market_signals.prog_kospi_corr is not none or market_signals.finv_kospi_corr is not none %}
+  <div class="bg-white rounded-lg shadow-sm p-4 space-y-4">
+    <h2 class="font-semibold text-slate-700">📈 KOSPI 지수와의 상관관계 분석</h2>
+
+    {# 상관계수 게이지 2개 #}
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+
+      {% macro corr_gauge(label, r, color_class) %}
+      {% if r is not none %}
+      <div>
+        <div class="flex items-center justify-between text-xs text-slate-500 mb-1">
+          <span>{{ label }}</span>
+          <span class="font-bold {{ color_class }} text-sm">r = {{ '%+.3f' | format(r) }}</span>
+        </div>
+        {# -1 ~ +1 게이지 바 #}
+        <div class="relative h-5 rounded-full overflow-hidden bg-gradient-to-r from-blue-200 via-slate-100 to-rose-200">
+          {# 중앙선 #}
+          <div class="absolute top-0 bottom-0 w-px bg-slate-400 left-1/2"></div>
+          {# 마커 #}
+          {% set pct = ((r + 1) / 2 * 100) | round(1) %}
+          <div class="absolute top-1 bottom-1 w-3 -ml-1.5 rounded-full bg-slate-800 shadow"
+               style="left: {{ pct }}%">
+          </div>
+        </div>
+        <div class="flex justify-between text-xs text-slate-400 mt-0.5 px-1">
+          <span>−1.0 (완전 음의 상관)</span><span>0</span><span>+1.0 (완전 양의 상관)</span>
+        </div>
+        <div class="mt-1.5 text-xs text-slate-500">
+          {% if r | abs > 0.7 %}
+            <span class="inline-block px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-semibold mr-1">강한 상관 (|r|&gt;0.7)</span>
+          {% elif r | abs > 0.4 %}
+            <span class="inline-block px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-semibold mr-1">중간 상관 (|r|&gt;0.4)</span>
+          {% else %}
+            <span class="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-semibold mr-1">약한 상관 (|r|≤0.4)</span>
+          {% endif %}
+          {% if r < 0 %}
+            순매도 증가 시 KOSPI 하락 동조 경향
+          {% else %}
+            순매수 증가 시 KOSPI 상승 동조 경향
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+      {% endmacro %}
+
+      {{ corr_gauge('프로그램 비차익 순매수 ↔ KOSPI',
+                    market_signals.prog_kospi_corr,
+                    'text-slate-700' if market_signals.prog_kospi_corr | abs <= 0.4
+                    else ('text-blue-600' if market_signals.prog_kospi_corr | abs <= 0.7 else 'text-blue-800')) }}
+
+      {{ corr_gauge('금융투자 순매수 ↔ KOSPI',
+                    market_signals.finv_kospi_corr,
+                    'text-slate-700' if market_signals.finv_kospi_corr | abs <= 0.4
+                    else ('text-blue-600' if market_signals.finv_kospi_corr | abs <= 0.7 else 'text-blue-800')) }}
+
+    </div>
+
+    {# 상관관계 해설 #}
+    <details class="mt-2">
+      <summary class="cursor-pointer text-xs text-slate-500 hover:text-slate-700 select-none">▶ 상관관계 해석 방법 보기</summary>
+      <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-600">
+
+        <div class="space-y-2">
+          <h4 class="font-semibold text-slate-700">Pearson 상관계수(r)란?</h4>
+          <p>두 변수가 함께 움직이는 <strong>선형 관계의 강도와 방향</strong>을 −1 ~ +1 범위로 나타냅니다.</p>
+          <table class="min-w-full border text-xs mt-1">
+            <thead class="bg-slate-50">
+              <tr>
+                <th class="px-2 py-1 text-left border">r 범위</th>
+                <th class="px-2 py-1 text-left border">해석</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="border-t"><td class="px-2 py-1 border font-mono">0.7 ~ 1.0</td><td class="px-2 py-1 border">강한 양의 상관 — 함께 오름</td></tr>
+              <tr class="border-t bg-slate-50"><td class="px-2 py-1 border font-mono">0.4 ~ 0.7</td><td class="px-2 py-1 border">중간 양의 상관</td></tr>
+              <tr class="border-t"><td class="px-2 py-1 border font-mono">−0.4 ~ 0.4</td><td class="px-2 py-1 border">약한/무 상관</td></tr>
+              <tr class="border-t bg-slate-50"><td class="px-2 py-1 border font-mono">−0.7 ~ −0.4</td><td class="px-2 py-1 border">중간 음의 상관</td></tr>
+              <tr class="border-t"><td class="px-2 py-1 border font-mono">−1.0 ~ −0.7</td><td class="px-2 py-1 border">강한 음의 상관 — 반대로 움직임</td></tr>
+            </tbody>
+          </table>
+          <p class="text-slate-400">※ 최근 {{ market_signals.lookback_days }}거래일 데이터 기준으로 계산 (약 1년)</p>
+        </div>
+
+        <div class="space-y-2">
+          <h4 class="font-semibold text-slate-700">이 지표를 어떻게 활용하나요?</h4>
+          <ul class="list-disc list-inside space-y-1.5">
+            <li>
+              <strong>프로그램 비차익 r ≈ −0.37</strong> 수준이면, 비차익 순매도가 크게 늘어날 때 KOSPI가 소폭 하락하는 경향이 있음을 의미합니다.
+              이는 외국인 ETF 환매 등 대규모 현물 매도가 시장에 매도 압력을 주기 때문입니다.
+            </li>
+            <li>
+              <strong>금융투자 r ≈ +0.28</strong> 수준이면, 금융투자 기관의 순매수가 늘어날 때 KOSPI도 소폭 상승하는 경향이 있음을 나타냅니다.
+              단, 이 값이 작을수록 금융투자 매매와 KOSPI의 직접적 연관성은 낮습니다.
+            </li>
+            <li>
+              상관계수는 <strong>동행 또는 후행 관계</strong>를 보여줄 뿐, 인과관계를 의미하지 않습니다.
+              경보 시그널 발생 시 참고 지표로 활용하되 단독 판단 기준으로 삼지 않도록 합니다.
+            </li>
+            <li>
+              상관계수가 <strong>−0.6 이하</strong>로 강해진다면, 프로그램 비차익 경보가 KOSPI 급락과 더 밀접하게 연결된 국면으로 주의가 필요합니다.
+            </li>
+          </ul>
+        </div>
+
+      </div>
+    </details>
+  </div>
+  {% endif %}
+
+  <p class="text-xs text-slate-400">
+    출처: KRX MDCSTAT02601 (프로그램매매) · pykrx 투자자별매매 |
+    갱신: <code>make v2-market-signals</code> (증분 수집)
+  </p>
+
+{% else %}
+  <div class="bg-white rounded-lg shadow-sm p-8 text-center text-slate-400">
+    시장 시그널 데이터 없음 — <code>make v2-market-signals</code> 실행 후 대시보드를 재생성하세요.
+  </div>
+{% endif %}
+
+</main>
+</body>
+</html>

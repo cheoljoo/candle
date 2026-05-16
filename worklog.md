@@ -1,3 +1,26 @@
+## 2026-05-16 16:30 ~ 18:37 (2h 7m) [tool: vscode-copilot / session: eac70b04-1c02-4033-a86d-3c01f01ca2b7]
+- `templates/_nav.html` : "시장 시그널" 메뉴 추가 (approx by mtime)
+- `templates/market_signals.html` 신규: 시장 시그널 전용 독립 페이지 — 경보 배너, 요약 카드, 3개월 차트, 1개월 상세 테이블
+- `templates/index.html` 홈 요약 간소화: 오늘 카드 + 3개월 미니 차트 + "전체 보기 →" 링크만 유지
+- `render.py` : `uk_fmt` Jinja2 필터 추가 — 10000억 이상 값을 "X조 Y,YYY억" 형식으로 변환 (−44664억 → `-4조 4,664억`)
+- `market_signals.py` : `fetch_kospi_index()` 추가 — pykrx로 KOSPI 일별 종가 증분 수집 → `data/market/kospi_index.csv`
+- `market_signals.py` : `_calc_correlation()` 헬퍼 (Pearson r), `check_signals()`에 `kospi_df` 파라미터 추가, `result`에 `prog_kospi_corr`/`finv_kospi_corr`/`kospi_data` 반환
+- `render.py` : kospi_index.csv 로드, 차트 데이터에 `kospi_close`/`kospi_y_pct` 추가, 테이블에 KOSPI 컬럼, 상관계수 반환
+- CSS flex 막대 차트 → SVG 인라인 차트 (막대 + KOSPI 꺾은선 polyline) 교체 (market_signals.html, index.html)
+- `market_signals.html` 용어 설명 카드 추가: 프로그램 비차익 순매수 / 금융투자 순매수 정의·활용법·출처
+- `market_signals.html` 상관관계 시각화 추가: −1~+1 그라디언트 게이지 바 + 강도 뱃지 + r값 해석 테이블
+
+## 2026-05-16 13:00 ~ 16:22 (3h 22m) [tool: vscode-copilot / session: eac70b04-1c02-4033-a86d-3c01f01ca2b7]
+- `src/candle/fetch/market_signals.py` 신규: KRX MDCSTAT02601 프로그램 비차익 데이터 fetch + pykrx 투자자별 매매 fetch
+- 퍼센타일 기반 시그널 임계값 구현: 하위 10%(프로그램) / 하위 20% × 3일 연속(금융투자) — 고정 3000억 기준 대신 역사적 분포 활용
+- `_get_trading_days()`: KOSPI 인덱스 OHLCV로 실제 거래일만 루프 → 332거래일 54.8초 수집
+- `run()`을 incremental 방식으로 개선: 기존 CSV 마지막 날짜 다음부터만 추가 수집, `--days` 파라미터 제거
+- `check_signals()`에 `program_max_sell` / `program_max_ratio` 추가 (역사적 최대 순매도 대비 비율)
+- `src/candle/cli.py`: `candle market-signals` CLI 명령 추가 (--today, --quiet 옵션만)
+- `Makefile`: `v2-market-signals` 타겟 추가 (v2-all 파이프라인 포함), `--days 360` 제거
+- `render.py`: `_load_market_signals()` 추가 — 3개월 차트 데이터 + 1개월 테이블(최신순, MAX/비율 컬럼), `common_ctx`에 `market_signals=` 추가
+- `index.html`: 시장 시그널 섹션 추가 — 🇰🇷 KR 배지, 3개월 CSS 막대 차트, 1개월 테이블(날짜/순매수/역사적MAX/MAX비율%), owner 옆 GitHub 소스 링크
+
 ## 2026-05-12 22:08 ~ 22:19 (0h 11m) [tool: vscode-copilot / session: 99bd5bbc-96aa-4a2e-b28b-f689149eaee3]
 - `dashboard/templates/index.html` 변곡점 테이블 개선: Ticker 셀에 종목명(한글/영문) 부제목 표시
 - 변곡점 inflection 신호(`-→+`/`+→-`) 색상 구분 추가 (초록/빨강)

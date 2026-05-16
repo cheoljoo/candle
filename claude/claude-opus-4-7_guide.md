@@ -7,7 +7,7 @@ purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-13 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능(Gmail → ETF 자동 등록) 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원.**
+> **2026-05-16 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능(Gmail → ETF 자동 등록) 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(프로그램 비차익+금융투자+KOSPI 상관관계) 대시보드 추가.**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 
@@ -61,7 +61,9 @@ candle/
 │   ├── fetch/
 │   │   ├── run.py               # _fetch_kr() 5단계 + _fetch_us_batch()
 │   │   ├── kr.py                # yfinance(.KS→.KQ) 우선, pykrx fallback
-│   │   └── us.py                # fetch_daily_batch(), fetch_fast_info(), fetch_dividends()
+│   │   ├── us.py                # fetch_daily_batch(), fetch_fast_info(), fetch_dividends()
+│   │   └── market_signals.py    # KRX 프로그램비차익 + 투자자별매매 + KOSPI지수 증분 수집
+│   │                            # check_signals(): 역사적 퍼센타일 경보 + Pearson 상관계수
 │   ├── analyze/
 │   │   ├── run.py               # 증분 처리 (analyze_meta.csv 기반)
 │   │   ├── indicators.py        # MA10D/50D/MA10M, MA10M_UPDOWN
@@ -87,14 +89,20 @@ candle/
 │   │   └── manual.py            # manual_input.csv 로드
 │   └── dashboard/
 │       ├── render.py            # Jinja2 렌더 · _load_docs() · _load_rank_snapshot() · name_map(전체 종목)
+│       │                        # uk_fmt 필터(억→조 변환) · _load_market_signals(KOSPI 연동)
 │       └── templates/
 │           ├── index.html · _nav.html · _type_legend.html
 │           ├── group_returns.html · compare.html · decisions.html
 │           ├── optimize.html    # 모든 그룹 탭에서 종목별 히트맵+조합 표시 (isPerTickerGroup)
+│           ├── market_signals.html  # 시장 시그널 전용 페이지 (SVG 차트+KOSPI꺾은선, 상관관계 게이지, 용어 설명)
 │           └── docs.html        # 문서 뷰어 (marked.js + highlight.js)
 ├── data/                        # CSV 저장소 (gitignore)
 │   ├── instruments.csv
 │   ├── analyze_meta.csv         # ticker별 analyzed_from/to (증분 판단용)
+│   ├── market/
+│   │   ├── program_trading.csv  # KRX 프로그램 비차익 순매수 (date, 비차익_순매수)
+│   │   ├── investor_trading.csv # 투자자별 매매 (date, 금융투자, ...)
+│   │   └── kospi_index.csv      # KOSPI 일별 종가 (date, close)
 │   ├── universe/
 │   ├── daily/{KR|US}/{ticker}.csv
 │   └── events/dividends.csv
@@ -131,6 +139,7 @@ candle backtest --market all [--from DATE] [--to DATE] [--label LABEL]
 candle compare  --from DATE [--to DATE] [--label LABEL] [--debug]
 candle simulate [--no-ai] [--debug]
 candle dashboard [--out DIR] [--debug]
+candle market-signals [--today YYYY-MM-DD] [--quiet]
 candle optimize-streak --market all
                        [--all-groups]              # 전체+4그룹 5개 파일 동시 생성
                        [--output-dir output/optimize/]

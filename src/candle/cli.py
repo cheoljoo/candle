@@ -257,6 +257,27 @@ def gmail_etf(
     typer.echo(f"gmail-etf: {res}")
 
 
+@app.command("market-signals")
+def market_signals(
+    today: Optional[str] = typer.Option(None, help="기준일 YYYY-MM-DD (기본=오늘)"),
+    quiet: bool = typer.Option(False, "--quiet", help="시그널 출력 억제"),
+):
+    """프로그램 비차익 순매도 + 금융투자 연속 순매도 시그널 확인.
+
+    증분 수집: 기존 CSV 이후 누락데이터만 자동 포집 (달력일 지정 불필요)
+    데이터 저장: data/market/program_trading.csv, data/market/investor_trading.csv
+    """
+    cfg = config.load()
+    _setup_logging(cfg)
+    from .fetch import market_signals as ms
+    res = ms.run(
+        data_dir=cfg.data_dir,
+        end=_today(today),
+        verbose=not quiet,
+    )
+    typer.echo(f"market-signals: program_signal={res['program_signal']}, finv_signal={res['finv_signal']}")
+
+
 def main():
     app()
 

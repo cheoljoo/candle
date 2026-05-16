@@ -738,3 +738,43 @@
     - alternative 안에 plain text(폴백) + HTML 순서로 첨부 → 클라이언트가 HTML 미지원 시 plain 표시
   - `main()` : `--decisions-json` 지정 시 plain body와 html body 동시 생성 후 `_send_one`에 전달.
 - **검증** : `uv run python gmail_sender.py --only-me --decisions-json dashboard_site/data/decisions.json` 로 owner에게 발송 — HTML 메일 정상 수신 확인.
+
+---
+
+## 2026-05-16 (2차 — 시장 시그널 대시보드 고도화)
+
+### 시장 시그널 전용 페이지 + 홈 요약 간소화
+- **사용자 요청** : 홈에는 그래프와 해당 날짜 내용만 표시하고, 전체 상세 내용은 별도 "시장 시그널" 메뉴로 분리
+- **수정**
+  - `templates/_nav.html` : "시장 시그널" 메뉴 아이템 추가 (market_signals.html 링크)
+  - `templates/market_signals.html` 신규: 독립 페이지 — 경보 배너, 요약 카드 2개, 3개월 CSS 막대 차트, 1개월 상세 테이블(날짜/순매수/역사MAX/MAX비율%)
+  - `templates/index.html` : 홈 시장 시그널 섹션 간소화 — 오늘 카드 2개 + 3개월 미니 차트 + "전체 보기 →" 링크만 유지
+  - `render.py` : `market_signals.html` 렌더 추가, `pages=11` 카운트 갱신
+
+### uk_fmt Jinja2 필터 추가 (억 → 조 변환)
+- **사용자 요청** : 33664억 같은 큰 숫자를 "3조 3664억" 형식으로 표시
+- **구현** : `render.py`에 `_uk_fmt(v)` 함수 추가 — `abs(v) >= 10000` 이면 `X조 Y,YYY억`, 아니면 `Y,YYY억` (음수 부호 보존)
+- `env.filters["uk_fmt"] = _uk_fmt` 등록 후 모든 템플릿에서 `{{ val | uk_fmt }}` 사용
+- **검증** : −44,664억 → `-4조 4,664억`, +3,300억 → `+3,300억`
+
+### KOSPI 지수 수집 + 상관관계 분석 (market_signals.py)
+- **사용자 요청** : 테이블 매수 옆에 KOSPI 지수 표시, 막대+꺾은선 그래프, 상관관계 계산
+- **아키텍처 결정** : 데이터 수집/상관계수 계산은 모두 `market_signals.py`에서 처리, `render.py`는 CSV 읽기만
+- **구현** (`src/candle/fetch/market_signals.py`)
+  - `fetch_kospi_index(start, end, save_path)` 신규: pykrx `stock.get_index_ohlcv("1001")` → `data/market/kospi_index.csv` 증분 저장
+  - `_calc_correlation(s1, s2)` 헬퍼: Pearson r, `pd.Series.corr()`, 샘플 10개 미만 시 None
+  - `check_signals()` 파라미터에 `kospi_df` 추가, result에 `prog_kospi_corr`, `finv_kospi_corr`, `kospi_data` 반환
+  - `run()` : kospi_index.csv 증분 fetch → `check_signals(kospi_df=kospi_df)` 전달, verbose 출력에 상관계수 추가
+- **검증** : `candle market-signals` 실행 → 프로그램 비차익 r=−0.373, 금융투자 r=+0.279 출력
+
+### SVG 인라인 차트 (막대+KOSPI 꺾은선) + 테이블 KOSPI 컬럼
+- **render.py** : `kospi_index.csv` 로드, `check_signals`에 `kospi_df=` 전달, 차트 데이터에 `kospi_close`/`kospi_y_pct` 필드 추가 (10~90% 정규화), 테이블에 `kospi_close`, 반환 dict에 `prog_kospi_corr`/`finv_kospi_corr` 추가
+- **market_signals.html / index.html** : CSS flex 막대 차트 → SVG `<rect>` 막대 + `<polyline>` KOSPI 꺾은선으로 교체 (`viewBox="0 0 N 100" preserveAspectRatio="none"`)
+- 테이블에 KOSPI 컬럼 추가, 차트 하단에 r값 인라인 표시
+
+### 시장 시그널 페이지 — 용어 설명 + 상관관계 시각화
+- **사용자 요청** : 프로그램 비차익/금융투자 용어 설명, 상관관계 의미 및 시각화 추가
+- **구현** (`templates/market_signals.html`)
+  - `<details open>` 용어 설명 카드: 프로그램 비차익(알고리즘 바스켓 매매, ETF 환매, 경보 로직), 금융투자(전문기관 자기계정, 연속 순매도 의미), 데이터 출처
+  - 상관관계 분석 섹션: `−1.0 ~ +1.0` 그라디언트 게이지 바 + 검정 마커(`left: pct%`), 강도 뱃지(강함/중간/약한) 자동 표시
+  - `<details>` "해석 방법": r 범위 해석표 + 현재 수치 활용법 (언제 경계가 필요한지 포함)

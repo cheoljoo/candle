@@ -22,7 +22,7 @@
     <div>
       <h1 class="text-xl font-semibold">Candle Dashboard</h1>
       <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
-      <p class="text-xs text-slate-400 mt-0.5">Owner: {{ owner_name }} &lt;<a href="mailto:{{ owner_email }}" class="hover:underline">{{ owner_email }}</a>&gt;</p>
+      <p class="text-xs text-slate-400 mt-0.5">Owner: {{ owner_name }} &lt;<a href="mailto:{{ owner_email }}" class="hover:underline">{{ owner_email }}</a>&gt; &nbsp;·&nbsp; <a href="https://github.com/cheoljoo/candle" target="_blank" class="hover:underline text-slate-500">GitHub ↗</a></p>
     </div>
     <div class="flex gap-3 text-sm">
       <div class="px-3 py-2 bg-slate-100 rounded">
@@ -73,8 +73,123 @@
         <span class="text-lg font-bold text-slate-700">의사결정</span>
         <span class="text-xs text-slate-400 mt-1">rule / AI / manual</span>
       </a>
+      <a href="market_signals.html" class="flex flex-col items-center justify-center p-4 rounded-lg border hover:bg-slate-50 transition">
+        <span class="text-lg font-bold text-slate-700">시장 시그널 🇰🇷</span>
+        <span class="text-xs text-slate-400 mt-1">프로그램/투자자 매매</span>
+      </a>
     </div>
   </section>
+
+  {# ── 시장 시그널 요약 (홈) — 한국(KR) 시장 ─────────────────────────── #}
+  {% if market_signals and market_signals.available %}
+  <section class="bg-white rounded-lg shadow-sm p-4">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-base font-semibold">
+        시장 시그널
+        <span class="pill bg-blue-100 text-blue-700 ml-1">🇰🇷 KR</span>
+        <span class="text-xs font-normal text-slate-400 ml-2">KOSPI 프로그램/투자자 매매 · 역사적 {{ market_signals.lookback_days }}거래일 퍼센타일 기준</span>
+      </h2>
+      <a href="market_signals.html" class="text-xs text-blue-600 hover:underline whitespace-nowrap ml-4">자세히 보기 →</a>
+    </div>
+
+    {# 활성 경보 배너 #}
+    {% if market_signals.any_signal %}
+    <div class="mb-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-sm space-y-1">
+      {% for msg in market_signals.signals %}
+      <div class="flex items-start gap-2"><span class="mt-0.5">⚠</span><span>{{ msg }}</span></div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="mb-3 p-2 rounded bg-emerald-50 border border-emerald-100 text-emerald-700 text-xs">
+      ✓ 현재 ETF 기계적 매도 시그널 없음
+    </div>
+    {% endif %}
+
+    {# 오늘 값 요약 #}
+    {% if market_signals.prog_table %}
+    {% set today_prog = market_signals.prog_table[0] %}
+    {% set today_inv  = market_signals.inv_table[0] if market_signals.inv_table else none %}
+    <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
+      <div class="p-3 rounded-lg border {% if today_prog.alert %}border-rose-200 bg-rose-50{% else %}bg-slate-50{% endif %}">
+        <div class="text-xs text-slate-400 mb-1">프로그램 비차익 순매수 <span class="text-slate-300">({{ today_prog.date }})</span></div>
+        <div class="font-bold text-lg {% if today_prog.alert %}text-rose-700{% elif today_prog.val_억 < 0 %}text-slate-700{% else %}text-emerald-700{% endif %}">
+          {{ today_prog.val_억 | uk_fmt }}
+        </div>
+        <div class="text-xs text-slate-400 mt-0.5">역사MAX {{ today_prog.max_억 | uk_fmt }} · MAX비율 <span class="{% if today_prog.max_ratio > 80 %}text-rose-600 font-semibold{% elif today_prog.max_ratio > 50 %}text-amber-600{% endif %}">{{ today_prog.max_ratio | round(1) }}%</span></div>
+      </div>
+      {% if today_inv %}
+      <div class="p-3 rounded-lg border {% if today_inv.alert %}border-rose-200 bg-rose-50{% else %}bg-slate-50{% endif %}">
+        <div class="text-xs text-slate-400 mb-1">금융투자 순매수 <span class="text-slate-300">({{ today_inv.date }})</span></div>
+        <div class="font-bold text-lg {% if today_inv.alert %}text-rose-700{% elif today_inv.val_억 < 0 %}text-slate-700{% else %}text-emerald-700{% endif %}">
+          {{ today_inv.val_억 | uk_fmt }}
+        </div>
+        <div class="text-xs text-slate-400 mt-0.5">역사MAX {{ today_inv.max_억 | uk_fmt }} · MAX비율 <span class="{% if today_inv.max_ratio > 80 %}text-rose-600 font-semibold{% elif today_inv.max_ratio > 50 %}text-amber-600{% endif %}">{{ today_inv.max_ratio | round(1) }}%</span></div>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      {# 프로그램 비차익 3개월 SVG 차트 #}
+      <div>
+        <div class="text-xs text-slate-500 mb-1">프로그램 비차익 — 3개월 추이 &nbsp;<span class="inline-block w-3 h-1.5 bg-slate-300 rounded-sm align-middle"></span> 순매도 &nbsp;<span class="inline-block w-4 border-t-2 border-blue-500 align-middle"></span> KOSPI</div>
+        <svg class="w-full h-16 block" viewBox="0 0 {{ market_signals.prog_chart_3m | length }} 100" preserveAspectRatio="none">
+          {% for d in market_signals.prog_chart_3m %}
+          <rect x="{{ loop.index0 + 0.05 }}" y="{{ (100 - [d.height_pct, 3] | max) | round(1) }}"
+                width="0.9" height="{{ [d.height_pct, 3] | max | round(1) }}"
+                fill="{% if d.alert %}#f87171{% elif d.val_억 < 0 %}#94a3b8{% else %}#6ee7b7{% endif %}">
+            <title>{{ d.date }}: {{ d.val_억 | uk_fmt }} | KOSPI {{ '{:,.0f}'.format(d.kospi_close) if d.kospi_close else '-' }}</title>
+          </rect>
+          {% endfor %}
+          {% if market_signals.prog_chart_3m | selectattr('kospi_y_pct') | list | length > 0 %}
+          <polyline
+            points="{% for d in market_signals.prog_chart_3m %}{% if d.kospi_y_pct is not none %}{{ loop.index0 + 0.5 }},{{ (100 - d.kospi_y_pct) | round(1) }} {% endif %}{% endfor %}"
+            fill="none" stroke="#3b82f6" stroke-width="0.8" />
+          {% endif %}
+        </svg>
+        <div class="flex justify-between text-xs text-slate-400 mt-0.5">
+          <span>← 3개월 전</span>
+          <span>오늘 →
+            {% if market_signals.prog_kospi_corr is not none %}
+            <span class="ml-2 text-blue-500">r={{ '%+.3f'|format(market_signals.prog_kospi_corr) }}</span>
+            {% endif %}
+          </span>
+        </div>
+      </div>
+      {# 금융투자 3개월 SVG 차트 #}
+      <div>
+        <div class="text-xs text-slate-500 mb-1">금융투자 — 3개월 추이 &nbsp;<span class="inline-block w-3 h-1.5 bg-slate-300 rounded-sm align-middle"></span> 순매도 &nbsp;<span class="inline-block w-4 border-t-2 border-blue-500 align-middle"></span> KOSPI</div>
+        <svg class="w-full h-16 block" viewBox="0 0 {{ market_signals.inv_chart_3m | length }} 100" preserveAspectRatio="none">
+          {% for d in market_signals.inv_chart_3m %}
+          <rect x="{{ loop.index0 + 0.05 }}" y="{{ (100 - [d.height_pct, 3] | max) | round(1) }}"
+                width="0.9" height="{{ [d.height_pct, 3] | max | round(1) }}"
+                fill="{% if d.alert %}#f87171{% elif d.val_억 < 0 %}#94a3b8{% else %}#6ee7b7{% endif %}">
+            <title>{{ d.date }}: {{ d.val_억 | uk_fmt }} | KOSPI {{ '{:,.0f}'.format(d.kospi_close) if d.kospi_close else '-' }}</title>
+          </rect>
+          {% endfor %}
+          {% if market_signals.inv_chart_3m | selectattr('kospi_y_pct') | list | length > 0 %}
+          <polyline
+            points="{% for d in market_signals.inv_chart_3m %}{% if d.kospi_y_pct is not none %}{{ loop.index0 + 0.5 }},{{ (100 - d.kospi_y_pct) | round(1) }} {% endif %}{% endfor %}"
+            fill="none" stroke="#3b82f6" stroke-width="0.8" />
+          {% endif %}
+        </svg>
+        <div class="flex justify-between text-xs text-slate-400 mt-0.5">
+          <span>← 3개월 전</span>
+          <span>오늘 →
+            {% if market_signals.finv_kospi_corr is not none %}
+            <span class="ml-2 text-blue-500">r={{ '%+.3f'|format(market_signals.finv_kospi_corr) }}</span>
+            {% endif %}
+          </span>
+        </div>
+      </div>
+    </div>{# end grid #}
+    <p class="mt-2 text-xs text-slate-400">
+      출처: KRX MDCSTAT02601 (프로그램매매) · pykrx 투자자별매매 |
+      갱신: <code>make v2-market-signals</code> (증분 수집) |
+      <a href="market_signals.html" class="text-blue-500 hover:underline">전체 보기 →</a>
+    </p>
+  </section>
+  {% endif %}
 
   {# 변곡점 발생 종목 (오늘) — Action Required #}
   <section class="bg-white rounded-lg shadow-sm p-4">

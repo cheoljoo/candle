@@ -314,5 +314,83 @@
         "duration": "0h 11m"
       }
     ]
+  },
+  {
+    "date": "2026-05-16",
+    "start": "13:00",
+    "end": "16:22",
+    "duration": "3h 22m",
+    "tool": "vscode-copilot",
+    "session_id": "eac70b04-1c02-4033-a86d-3c01f01ca2b7",
+    "project": "candle",
+    "tasks": [
+      {
+        "title": "KRX 프로그램 비차익 + 투자자별 매매 시장 시그널 시스템 신규 구축",
+        "detail": "market_signals.py 신규 파일: KRX MDCSTAT02601 per-day 루프 fetch, pykrx 투자자별 매매 fetch, _get_trading_days() KOSPI 인덱스 기반 거래일 필터, 332거래일 54.8초 수집. approx by mtime.",
+        "start": "13:00",
+        "end": "14:30",
+        "duration": "1h 30m"
+      },
+      {
+        "title": "퍼센타일 기반 시그널 임계값 + check_signals() 구현",
+        "detail": "고정 -3000억 대신 역사적 분포 하위 10%/20% 퍼센타일 임계값 사용. program_max_sell / program_max_ratio (역사적 최대 순매도 대비 비율) 추가. CLI candle market-signals 명령 추가, Makefile v2-market-signals 타겟 추가. approx by mtime.",
+        "start": "14:30",
+        "end": "15:28",
+        "duration": "0h 58m"
+      },
+      {
+        "title": "대시보드 시장 시그널 섹션 통합 + UI 개선",
+        "detail": "render.py: _load_market_signals() 추가(3개월 차트 데이터, 1개월 테이블 최신순, MAX/비율), common_ctx에 market_signals= 추가. index.html: KR 배지, 3개월 CSS 막대 차트, 1개월 테이블(날짜/순매수/역사적MAX/MAX비율%), owner GitHub 소스 링크 추가. run() incremental 방식 + --days 파라미터 제거. approx by mtime.",
+        "start": "15:28",
+        "end": "16:22",
+        "duration": "0h 54m"
+      }
+    ]
+  },
+  {
+    "date": "2026-05-16",
+    "start": "16:30",
+    "end": "18:37",
+    "duration": "2h 7m",
+    "tool": "vscode-copilot",
+    "session_id": "eac70b04-1c02-4033-a86d-3c01f01ca2b7",
+    "tasks": [
+      {
+        "title": "시장 시그널 전용 페이지 신규 + 홈 요약 간소화",
+        "detail": "market_signals.html 독립 페이지 신규 생성(경보 배너/요약 카드/3개월 차트/1개월 테이블), _nav.html 메뉴 추가, index.html 홈 섹션 간소화(오늘 카드+미니 차트+링크), render.py pages=11 갱신 (approx by mtime)",
+        "start": "16:30",
+        "end": "17:10",
+        "duration": "0h 40m"
+      },
+      {
+        "title": "uk_fmt Jinja2 필터 구현 (억→조 변환)",
+        "detail": "render.py에 _uk_fmt() 추가: abs>=10000이면 X조 Y,YYY억 형식, 음수 부호 보존. env.filters 등록. -44664억 → -4조 4,664억 검증",
+        "start": "17:10",
+        "end": "17:30",
+        "duration": "0h 20m"
+      },
+      {
+        "title": "KOSPI 지수 수집 + 상관관계 계산 (market_signals.py)",
+        "detail": "fetch_kospi_index(): pykrx stock.get_index_ohlcv(\"1001\") 증분 수집 → data/market/kospi_index.csv. _calc_correlation(): Pearson r, 10개 미만 None. check_signals()에 kospi_df 파라미터 추가, result에 prog_kospi_corr/finv_kospi_corr/kospi_data 반환. run()에 KOSPI 증분 fetch 추가. 검증: r=-0.373 (프로그램 비차익), r=+0.279 (금융투자)",
+        "start": "17:30",
+        "end": "17:55",
+        "duration": "0h 25m"
+      },
+      {
+        "title": "SVG 인라인 차트 교체 + 테이블 KOSPI 컬럼 추가",
+        "detail": "render.py: kospi_index.csv 로드, 차트 데이터에 kospi_close/kospi_y_pct(10~90% 정규화), 테이블에 kospi_close. market_signals.html/index.html: CSS flex 막대 → SVG rect+polyline(KOSPI 꺾은선). 상관계수 r값 차트 하단 표시",
+        "start": "17:55",
+        "end": "18:27",
+        "duration": "0h 32m"
+      },
+      {
+        "title": "용어 설명 카드 + 상관관계 시각화 게이지",
+        "detail": "market_signals.html: <details open> 용어 설명(프로그램 비차익/금융투자 정의·로직·출처). 상관관계 분석 섹션: -1~+1 그라디언트 게이지 바+마커(CSS left:%), 강도 뱃지, <details> r 해석 테이블+현재 수치 활용법",
+        "start": "18:27",
+        "end": "18:37",
+        "duration": "0h 10m"
+      }
+    ],
+    "project": "candle"
   }
 ]
