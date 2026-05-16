@@ -1,3 +1,13 @@
+## 2026-05-16 22:00 ~ 22:30 (30m) [tool: vscode-copilot / session: eac70b04-1c02-4033-a86d-3c01f01ca2b7]
+- `Makefile` : `v2-all-kr` 신규 — 한국장 종료 후 KR 전용 파이프라인 (fetch-kr→analyze-kr→backtest-kr→simulate→market-signals→dashboard)
+- `Makefile` : `v2-all-us` 신규 — 미국장 종료 후 US 전용 파이프라인 (fetch-us→analyze-us→backtest-us→simulate→dashboard)
+- `Makefile` : `v2-fetch-kr/us`, `v2-analyze-kr/us`, `v2-backtest-kr/us`, `v2-backtest-compare-full/5y-kr/us` 단계별 타겟 추가
+- `Makefile` : help 섹션 "시장별 분리 파이프라인" 항목 추가
+- `candle.sh` : 인자(`kr|us`) 기반 파이프라인 분기, 로그 파일명 시장별 분리 (`candle-v2-kr.log` / `candle-v2-us.log` / `candle-v2-YYYY_MM_DD.log`)
+- `claude-work.md` : 2026-05-16 3차 항목 추가 (Makefile KR/US 분리, candle.sh 개선)
+- `claude-opus-4-7_guide.md` : §4 Makefile 섹션 전면 재작성 (10차), 헤더 날짜 업데이트
+- `mm.md` : 최신 commit msg 추가
+
 ## 2026-05-16 16:30 ~ 18:37 (2h 7m) [tool: vscode-copilot / session: eac70b04-1c02-4033-a86d-3c01f01ca2b7]
 - `templates/_nav.html` : "시장 시그널" 메뉴 추가 (approx by mtime)
 - `templates/market_signals.html` 신규: 시장 시그널 전용 독립 페이지 — 경보 배너, 요약 카드, 3개월 차트, 1개월 상세 테이블

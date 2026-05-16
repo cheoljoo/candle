@@ -1,13 +1,13 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-13 (8차)
+date: 2026-05-16 (10차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-16 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능(Gmail → ETF 자동 등록) 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(프로그램 비차익+금융투자+KOSPI 상관관계) 대시보드 추가.**
+> **2026-05-16 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능(Gmail → ETF 자동 등록) 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(프로그램 비차익+금융투자+KOSPI 상관관계) 대시보드 추가. Makefile KR/US 분리 파이프라인(v2-all-kr/v2-all-us) 및 candle.sh 인자 분기 추가.**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 
@@ -414,42 +414,81 @@ type2_1b:
 ### 4.1 주요 타겟 구조
 
 ```
-v2-all: v2-universe v2-fetch-full v2-analyze v2-backtest v2-simulate v2-dashboard
+v2-all:    v2-universe v2-fetch-full v2-analyze v2-backtest v2-simulate v2-dashboard
+v2-all-kr: v2-gmail-etf v2-fetch-kr v2-analyze-kr v2-backtest-kr v2-simulate v2-market-signals v2-dashboard v2-sendmail
+v2-all-us: v2-fetch-us v2-analyze-us v2-backtest-us v2-simulate v2-dashboard v2-sendmail
 
-v2-backtest (병렬):
-  ├── v2-backtest-compare-full   → backtest --label full + compare --label full
-  ├── v2-backtest-compare-5y     → backtest --label 5y  + compare --label 5y
-  └── v2-backtest-compare-2010-2020 → backtest/compare --label 2010-2020
+v2-backtest (병렬, --market all):
+  ├── v2-backtest-compare-full         → backtest --market all --label full  + compare
+  ├── v2-backtest-compare-5y           → backtest --market all --label 5y    + compare
+  ├── v2-backtest-compare-2010-2020    → backtest --market all (고정 기간)
+  └── v2-backtest-compare-2000-2015    → backtest --market all (고정 기간)
+
+v2-backtest-kr (병렬, --market kr):
+  ├── v2-backtest-compare-full-kr      → backtest --market kr --label full   + compare
+  └── v2-backtest-compare-5y-kr        → backtest --market kr --label 5y     + compare
+
+v2-backtest-us (병렬, --market us):
+  ├── v2-backtest-compare-full-us      → backtest --market us --label full   + compare
+  └── v2-backtest-compare-5y-us        → backtest --market us --label 5y     + compare
 ```
 
 ### 4.2 자주 쓰는 명령
 
 ```bash
-# 파라미터 최적화 (v2-all 과 별개 — 필요 시 수동 실행)
+# ── 시장별 분리 파이프라인 (일별 운영 권장) ──
+./candle.sh kr     # 한국장 종료 후 ~16:00 KST 실행 (v2-all-kr)
+./candle.sh us     # 미국장 종료 후 ~09:00 KST 실행 (v2-all-us)
+
+make v2-all-kr SENDMAIL=YES     # KR 파이프라인 + 메일 발송
+make v2-all-us SENDMAIL=YES     # US 파이프라인 + 메일 발송
+
+# ── 전체 파이프라인 (수동 or 초기) ──
+make v2-all                     # 전체 (universe→fetch-full→analyze→backtest→simulate→dashboard)
+make v2-all SENDMAIL=YES        # 전체 + 메일
+
+# ── 파라미터 최적화 (v2-all 과 별개 — 필요 시 수동 실행) ──
 make v2-optimize                # plus 4~40 step2, minus 4~10 step2, 76 조합
 make v2-optimize DEBUG=--debug  # 상세 출력
 
-# 일별 운영 (증분)
-make v2-fetch       # 오늘치만 fetch
-make v2-analyze     # 새 row 자동 감지 + 계산
-make v2-backtest    # skip=대부분, 신규 row만 resume
+# ── 개별 단계 수동 실행 ──
+make v2-fetch-kr    # KR만 증분 fetch
+make v2-fetch-us    # US만 증분 fetch
+make v2-analyze-kr  # KR만 분석
+make v2-analyze-us  # US만 분석
+make v2-backtest-kr # KR만 backtest (full+5y 병렬)
+make v2-backtest-us # US만 backtest (full+5y 병렬)
 make v2-dashboard   # HTML 재생성
 
-# 최초 전체 백필 (1회)
+# ── 최초 전체 백필 (1회) ──
 make v2-fetch-full              # 2000-01-01부터 전체 fetch
 make v2-analyze-refresh         # 전체 재분석 (--refresh)
 make v2-backtest-compare-full   # 2000년 이후 전체 backtest+compare
 
-# 새 기간 추가 시
-# 1) v2-backtest-compare-<label> 타겟 정의
-# 2) v2-backtest 의 $(MAKE) -j 줄에 추가
-
-# 디버그
+# ── 디버그 ──
 make v2-all DEBUG=--debug
-make v2-fetch DEBUG=--debug
+make v2-all-kr DEBUG=--debug
 ```
 
-### 4.3 단독 실행 (특수 케이스)
+### 4.3 candle.sh 사용법
+
+```bash
+./candle.sh        # v2-all  (기존 동작 유지)
+./candle.sh kr     # v2-all-kr  (한국장 종료 후 ~16:00 KST)
+./candle.sh us     # v2-all-us  (미국장 종료 후 ~09:00 KST)
+```
+
+로그 파일:
+- `candle-v2.log` / `candle-v2-kr.log` / `candle-v2-us.log` (실행 중 실시간)
+- `candle-v2-YYYY_MM_DD.log` / `candle-v2-kr-YYYY_MM_DD.log` / `candle-v2-us-YYYY_MM_DD.log` (날짜별 백업)
+
+crontab 설정 예시:
+```
+0 16 * * 1-5  /home/cheoljoo/code/candle/candle.sh kr >> /tmp/candle-kr-cron.log 2>&1
+0  9 * * 2-6  /home/cheoljoo/code/candle/candle.sh us >> /tmp/candle-us-cron.log 2>&1
+```
+
+### 4.4 단독 실행 (특수 케이스)
 
 ```bash
 # 특정 label/기간만
@@ -670,7 +709,21 @@ dashboard_site/data/
 
 ---
 
-부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-13 (9차).
+부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-16 (10차).
+
+---
+
+### 2026-05-16 변경 사항 (10차)
+
+#### Makefile — KR/US 분리 파이프라인 추가
+- `v2-all-kr` / `v2-all-us` 타겟 신규. 각각 KR/US 전용 fetch→analyze→backtest→simulate→dashboard 순서로 실행.
+- `v2-fetch-kr/us`, `v2-analyze-kr/us`, `v2-backtest-kr/us`, `v2-backtest-compare-full/5y-kr/us` 타겟 추가.
+- help 섹션에 "시장별 분리 파이프라인" 항목 추가.
+- 섹션 4.1/4.2/4.3 현행화.
+
+#### candle.sh — 인자 기반 파이프라인 분기
+- `./candle.sh kr` → v2-all-kr, `./candle.sh us` → v2-all-us, 인자 없음 → v2-all.
+- 로그 파일명 / 날짜 백업 파일명도 시장별로 분리.
 
 ---
 

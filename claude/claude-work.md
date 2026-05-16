@@ -778,3 +778,48 @@
   - `<details open>` 용어 설명 카드: 프로그램 비차익(알고리즘 바스켓 매매, ETF 환매, 경보 로직), 금융투자(전문기관 자기계정, 연속 순매도 의미), 데이터 출처
   - 상관관계 분석 섹션: `−1.0 ~ +1.0` 그라디언트 게이지 바 + 검정 마커(`left: pct%`), 강도 뱃지(강함/중간/약한) 자동 표시
   - `<details>` "해석 방법": r 범위 해석표 + 현재 수치 활용법 (언제 경계가 필요한지 포함)
+
+---
+
+## 2026-05-16 (3차 — Makefile KR/US 분리 + candle.sh 개선)
+
+### Makefile — v2-all-kr / v2-all-us 시장별 파이프라인 분리
+- **사용자 요청** : 한국장(~16:00 KST)과 미국장(~09:00 KST)이 끝나는 시간이 다르므로 각각 끝날 때마다 KR/US 전용 파이프라인을 실행할 수 있게 분리
+- **설계**
+  - `fetch`, `analyze`, `backtest` 는 `--market kr|us|all` 옵션 지원을 확인
+  - `simulate`, `dashboard` 는 `--market` 없이 전체 실행 (양쪽 파이프라인에서 공통 사용)
+  - `market-signals` 는 KRX 데이터이므로 KR 파이프라인에만 포함
+  - `gmail-etf` 는 KR 파이프라인에만 포함 (하루 1회 체크로 충분)
+- **추가된 Makefile 타겟** (`.PHONY` 포함)
+  - `v2-fetch-kr` : `candle fetch --market kr`
+  - `v2-fetch-us` : `candle fetch --market us`
+  - `v2-analyze-kr` : `candle analyze --market kr` + 진행 메일
+  - `v2-analyze-us` : `candle analyze --market us` + 진행 메일
+  - `v2-backtest-compare-full-kr/us` : backtest(--market kr/us) + compare 순차
+  - `v2-backtest-compare-5y-kr/us` : 5년 rolling backtest(--market kr/us) + compare
+  - `v2-backtest-kr` : full-kr + 5y-kr 병렬(`-j`) + 진행 메일
+  - `v2-backtest-us` : full-us + 5y-us 병렬(`-j`) + 진행 메일
+  - `v2-all-kr` : `gmail-etf → fetch-kr → analyze-kr → backtest-kr → simulate → market-signals → dashboard → sendmail`
+  - `v2-all-us` : `fetch-us → analyze-us → backtest-us → simulate → dashboard → sendmail`
+- **help 섹션** : "시장별 분리 파이프라인" 항목 추가 (v2-all-kr/v2-all-us 설명)
+- **검증** : `make -n v2-all-kr` / `make -n v2-all-us` dry-run으로 실행 순서 확인
+
+### candle.sh — 인자(kr/us)에 따라 파이프라인 분기
+- **사용자 요청** : `candle.sh` 뒤에 `kr` 또는 `us`를 붙여 해당 파이프라인 실행, 로그 파일명도 맞게 변경
+- **수정** (`candle.sh` 전면 개선)
+  - 인자 `$1` 파싱: `kr` → `v2-all-kr` / `us` → `v2-all-us` / 없음 → `v2-all`
+  - 로그 파일: `candle-v2-kr.log` / `candle-v2-us.log` / `candle-v2.log`
+  - 날짜 백업 파일 패턴: `candle-v2-kr-YYYY_MM_DD.log` / `candle-v2-us-YYYY_MM_DD.log` / `candle-v2-YYYY_MM_DD.log`
+  - 잘못된 인자 시 `Usage: $0 [kr|us]` 출력 후 exit 1
+- **사용법**
+  ```bash
+  ./candle.sh        # v2-all  (기존 동작 유지)
+  ./candle.sh kr     # v2-all-kr  (한국장 종료 후 ~16:00 KST)
+  ./candle.sh us     # v2-all-us  (미국장 종료 후 ~09:00 KST)
+  ```
+- **crontab 예시**
+  ```
+  0 16 * * 1-5  /home/cheoljoo/code/candle/candle.sh kr >> /tmp/candle-kr-cron.log 2>&1
+  0  9 * * 2-6  /home/cheoljoo/code/candle/candle.sh us >> /tmp/candle-us-cron.log 2>&1
+  ```
+- **검증** : `bash -n candle.sh` → syntax OK 확인

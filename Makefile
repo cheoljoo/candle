@@ -11,19 +11,22 @@ SENDMAIL ?= YES
         backtest-type1-2 backtest-type2 backtest-type4 backtest-type4-2 backtest-compare \
         all clean help \
         v2-universe v2-universe-small \
-        v2-fetch v2-fetch-full \
-        v2-analyze v2-analyze-refresh \
+        v2-fetch v2-fetch-full v2-fetch-kr v2-fetch-us \
+        v2-analyze v2-analyze-refresh v2-analyze-kr v2-analyze-us \
         v2-backtest v2-backtest-full v2-backtest-5y \
+        v2-backtest-kr v2-backtest-us \
         v2-compare v2-compare-full v2-compare-5y \
         v2-backtest-compare-full v2-backtest-compare-5y \
         v2-backtest-compare-2010-2020 v2-backtest-compare-2000-2015 \
+        v2-backtest-compare-full-kr v2-backtest-compare-5y-kr \
+        v2-backtest-compare-full-us v2-backtest-compare-5y-us \
         v2-simulate v2-simulate-noai \
         v2-dashboard \
         v2-mail v2-mail-me \
         v2-optimize \
         v2-gmail-etf v2-gmail-etf-dry \
         v2-market-signals \
-        v2-smoke v2-all
+        v2-smoke v2-all v2-all-kr v2-all-us
 
 # ── 도움말 ────────────────────────────────────────────────────────────────────
 help:
@@ -35,10 +38,22 @@ help:
 	@echo "  make v2-all DEBUG=--debug           - 위 + 단계별 상세 출력"
 	@echo "  make v2-all DEBUG=--debug SENDMAIL=YES - 디버그 + 메일 발송"
 	@echo ""
+	@echo "시장별 분리 파이프라인:"
+	@echo "  make v2-all-kr                      - KR 전용: fetch→analyze→backtest→simulate→market-signals→dashboard (한국장 종료 ~16:00 KST)"
+	@echo "  make v2-all-us                      - US 전용: fetch→analyze→backtest→simulate→dashboard (미국장 종료 ~09:00 KST)"
+	@echo "  make v2-all-kr SENDMAIL=YES         - 위 + 완료 후 메일 발송"
+	@echo "  make v2-all-us SENDMAIL=YES         - 위 + 완료 후 메일 발송"
+	@echo ""
 	@echo "단계별 실행:"
 	@echo "  make v2-universe                    - 종목 목록 갱신 (KOSPI200/SP500/ETF)"
-	@echo "  make v2-fetch                       - 오늘치 증분 fetch"
+	@echo "  make v2-fetch                       - 오늘치 증분 fetch (all)"
+	@echo "  make v2-fetch-kr                    - KR 증분 fetch만"
+	@echo "  make v2-fetch-us                    - US 증분 fetch만"
 	@echo "  make v2-fetch-full                  - 2000-01-01부터 전체 fetch"
+	@echo "  make v2-analyze-kr                  - KR 증분 분석만"
+	@echo "  make v2-analyze-us                  - US 증분 분석만"
+	@echo "  make v2-backtest-kr                 - KR backtest+compare (full/5y 병렬)"
+	@echo "  make v2-backtest-us                 - US backtest+compare (full/5y 병렬)"
 	@echo "  make v2-analyze                     - 증분 분석 (새 row 자동 감지)"
 	@echo "  make v2-analyze-refresh             - 전체 재분석 (백필 후 1회 실행)"
 	@echo "  make v2-backtest                    - 기간별 backtest+compare 병렬 실행"
@@ -239,6 +254,66 @@ v2-gmail-etf-dry:
 v2-market-signals:
 	set -o pipefail; uv run candle market-signals $(DEBUG) | tee v2-market-signals.log
 	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) market-signals" --body-file="./v2-market-signals.log" --only-me --sendmail "$(SENDMAIL)"
+
+# ── KR 전용 단계 (한국장 종료 후 ~16:00 KST) ─────────────────────────────────
+v2-fetch-kr:
+	set -o pipefail; uv run candle fetch --market kr $(DEBUG) | tee v2-fetch-kr.log
+
+v2-analyze-kr:
+	set -o pipefail; uv run candle analyze --market kr $(DEBUG) | tee v2-analyze-kr.log
+	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-analyze-kr.log" --body-file="./v2-analyze-kr.log" --only-me --sendmail "$(SENDMAIL)"
+
+v2-backtest-compare-full-kr:
+	uv run candle backtest --from 2000-01-01 --label full --market kr $(DEBUG)
+	uv run candle compare  --from 2000-01-01 --label full $(DEBUG)
+
+v2-backtest-compare-5y-kr:
+	uv run candle backtest --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y --market kr $(DEBUG)
+	uv run candle compare  --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y $(DEBUG)
+
+v2-backtest-kr:
+	set -o pipefail; $(MAKE) -j v2-backtest-compare-full-kr v2-backtest-compare-5y-kr DEBUG="$(DEBUG)" | tee v2-backtest-kr.log
+	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-backtest-kr.log" --body-file="./v2-backtest-kr.log" --only-me --sendmail "$(SENDMAIL)"
+
+v2-sendmail-kr:
+	uv run python -u gmail_sender.py \
+		--sendmail "$(SENDMAIL)" \
+		--subject="[candle][v2] $$(date +%Y-%m-%d) 투자 리포트 (한국 update)" \
+		--decisions-json="./dashboard_site/data/decisions.json"
+
+# ── US 전용 단계 (미국장 종료 후 ~09:00 KST) ──────────────────────────────────
+v2-fetch-us:
+	set -o pipefail; uv run candle fetch --market us $(DEBUG) | tee v2-fetch-us.log
+
+v2-analyze-us:
+	set -o pipefail; uv run candle analyze --market us $(DEBUG) | tee v2-analyze-us.log
+	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-analyze-us.log" --body-file="./v2-analyze-us.log" --only-me --sendmail "$(SENDMAIL)"
+
+v2-backtest-compare-full-us:
+	uv run candle backtest --from 2000-01-01 --label full --market us $(DEBUG)
+	uv run candle compare  --from 2000-01-01 --label full $(DEBUG)
+
+v2-backtest-compare-5y-us:
+	uv run candle backtest --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y --market us $(DEBUG)
+	uv run candle compare  --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y $(DEBUG)
+
+v2-backtest-us:
+	set -o pipefail; $(MAKE) -j v2-backtest-compare-full-us v2-backtest-compare-5y-us DEBUG="$(DEBUG)" | tee v2-backtest-us.log
+	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-backtest-us.log" --body-file="./v2-backtest-us.log" --only-me --sendmail "$(SENDMAIL)"
+
+v2-sendmail-us:
+	uv run python -u gmail_sender.py \
+		--sendmail "$(SENDMAIL)" \
+		--subject="[candle][v2] $$(date +%Y-%m-%d) 투자 리포트 (미국 update)" \
+		--decisions-json="./dashboard_site/data/decisions.json"
+
+# ── KR 파이프라인 (한국장 종료 후 ~16:00 KST 실행) ────────────────────────────
+# 순서: gmail-etf → fetch(KR) → analyze(KR) → backtest(KR) → simulate(전체) → market-signals → dashboard → 메일
+v2-all-kr: v2-gmail-etf v2-fetch-kr v2-analyze-kr v2-backtest-kr v2-simulate v2-market-signals v2-dashboard v2-sendmail-kr
+
+# ── US 파이프라인 (미국장 종료 후 ~09:00 KST 실행) ────────────────────────────
+# 순서: fetch(US) → analyze(US) → backtest(US) → simulate(전체) → dashboard → 메일
+v2-all-us: v2-fetch-us v2-analyze-us v2-backtest-us v2-simulate v2-dashboard v2-sendmail-us
 
 # ── smoke (소규모 universe 빠른 검증) ─────────────────────────────────────────
 v2-smoke:
