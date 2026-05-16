@@ -278,6 +278,66 @@ def market_signals(
     typer.echo(f"market-signals: program_signal={res['program_signal']}, finv_signal={res['finv_signal']}")
 
 
+@app.command("foreign-trading")
+def foreign_trading_cmd(
+    market: str  = typer.Option("kr", help="kr (KOSPI200만 지원)"),
+    workers: int = typer.Option(4,   "--workers", help="병렬 worker 수 (기본 4)"),
+    quiet: bool  = typer.Option(False, "--quiet",  help="진행 출력 억제"),
+):
+    """KOSPI200 종목별 외국인/기관 일별 순매수 증분 수집.
+
+    pykrx get_market_trading_value_by_date로 종목별 외국인합계·기관합계·개인 수집.
+    데이터 저장: data/market/foreign/{ticker}.csv
+    """
+    cfg = config.load()
+    _setup_logging(cfg)
+    from .storage import csv_io, paths
+    from .fetch import foreign_trading as ft
+
+    inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+    if inst.empty:
+        typer.echo("instruments.csv 없음. candle universe 먼저 실행")
+        raise typer.Exit(1)
+    tickers = inst[inst["group_name"] == "KOSPI200"]["ticker"].astype(str).tolist()
+    if not tickers:
+        typer.echo("KOSPI200 종목 없음")
+        raise typer.Exit(1)
+
+    typer.echo(f"foreign-trading: KOSPI200 {len(tickers)}개 종목 수집 시작")
+    results = ft.run(
+        data_dir=cfg.data_dir,
+        tickers=tickers,
+        workers=workers,
+        verbose=not quiet,
+    )
+    added = sum(v for v in results.values() if v > 0)
+    typer.echo(f"foreign-trading: 완료 — {added}건 추가 ({len(results)}개 종목 처리)")
+
+
+@app.command("market-signals-us")
+def market_signals_us(
+    today: Optional[str] = typer.Option(None, help="기준일 YYYY-MM-DD (기본=오늘)"),
+    quiet: bool = typer.Option(False, "--quiet", help="시그널 출력 억제"),
+):
+    """미국 시장 시그널 — VIX 공포 지수 + 미국채 수익률 곡선 역전.
+
+    증분 수집: 기존 CSV 이후 누락데이터만 자동 포집
+    데이터 저장: data/market/us_vix.csv, data/market/us_yields.csv
+    """
+    cfg = config.load()
+    _setup_logging(cfg)
+    from .fetch import market_signals_us as ms_us
+    res = ms_us.run(
+        data_dir=cfg.data_dir,
+        end=_today(today),
+        verbose=not quiet,
+    )
+    typer.echo(
+        f"market-signals-us: vix_signal={res['vix_signal']}, "
+        f"inversion_signal={res['inversion_signal']}"
+    )
+
+
 def main():
     app()
 

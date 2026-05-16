@@ -17,9 +17,9 @@
 <header class="border-b bg-white">
   <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-semibold">시장 시그널 <span class="pill bg-blue-100 text-blue-700 ml-1">🇰🇷 KR</span></h1>
+      <h1 class="text-xl font-semibold">시장 시그널</h1>
       <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
-      <p class="text-xs text-slate-400 mt-0.5">KOSPI 프로그램/투자자 매매 · 역사적 퍼센타일 기반 시그널</p>
+      <p class="text-xs text-slate-400 mt-0.5">역사적 퍼센타일 기반 경보 · KR (프로그램/투자자 매매) · US (VIX·수익률 곡선)</p>
     </div>
     <a href="index.html" class="text-sm text-slate-500 hover:underline">← 홈으로</a>
   </div>
@@ -27,8 +27,32 @@
 
 {% include "_nav.html" %}
 
-<main class="max-w-7xl mx-auto p-4 space-y-6">
+<main class="max-w-7xl mx-auto p-4 space-y-6" x-data="{ ms_tab: 'kr' }">
 
+{# ── KR / US 탭 ────────────────────────────────────────────────────────── #}
+<div class="border-b bg-white -mx-4 px-4">
+  <div class="max-w-7xl flex gap-1 text-sm">
+    <button @click="ms_tab='kr'"
+            :class="ms_tab==='kr' ? 'border-b-2 border-slate-800 font-semibold text-slate-800' : 'text-slate-500'"
+            class="px-4 py-2 whitespace-nowrap flex items-center gap-1">
+      🇰🇷 KR
+      {% if market_signals and market_signals.any_signal %}
+      <span class="ml-1 w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
+      {% endif %}
+    </button>
+    <button @click="ms_tab='us'"
+            :class="ms_tab==='us' ? 'border-b-2 border-slate-800 font-semibold text-slate-800' : 'text-slate-500'"
+            class="px-4 py-2 whitespace-nowrap flex items-center gap-1">
+      🇺🇸 US
+      {% if market_signals_us and market_signals_us.any_signal %}
+      <span class="ml-1 w-2 h-2 rounded-full bg-rose-500 inline-block"></span>
+      {% endif %}
+    </button>
+  </div>
+</div>
+
+{# ══ KR 탭 ══════════════════════════════════════════════════════════════ #}
+<div x-show="ms_tab==='kr'" x-cloak>
 {% if market_signals and market_signals.available %}
 
   {# ── 활성 경보 배너 ─────────────────────────────────────────────────── #}
@@ -438,9 +462,268 @@
 
 {% else %}
   <div class="bg-white rounded-lg shadow-sm p-8 text-center text-slate-400">
-    시장 시그널 데이터 없음 — <code>make v2-market-signals</code> 실행 후 대시보드를 재생성하세요.
+    KR 시장 시그널 데이터 없음 — <code>make v2-market-signals</code> 실행 후 대시보드를 재생성하세요.
   </div>
 {% endif %}
+</div>{# end KR tab #}
+
+{# ══ US 탭 ══════════════════════════════════════════════════════════════ #}
+<div x-show="ms_tab==='us'" x-cloak class="space-y-6">
+{% if market_signals_us and market_signals_us.available %}
+
+  {# 활성 경보 배너 #}
+  {% if market_signals_us.any_signal %}
+  <div class="p-4 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 space-y-1">
+    <div class="font-semibold mb-1">⚠ 미국 시장 시그널 활성</div>
+    {% for msg in market_signals_us.signals %}
+    <div class="flex items-start gap-2 text-sm"><span class="mt-0.5">•</span><span>{{ msg }}</span></div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="p-3 rounded bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm">
+    ✓ 현재 VIX·수익률 역전 경보 없음
+  </div>
+  {% endif %}
+
+  {# 요약 카드 2개 #}
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    {# VIX 카드 #}
+    <div class="bg-white rounded-lg shadow-sm p-4 border-l-4
+      {% if market_signals_us.vix_signal %}border-rose-400{% else %}border-slate-200{% endif %}">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-semibold text-slate-700">VIX 공포 지수</span>
+        {% if market_signals_us.vix_signal %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-700">
+          ⚠ 상위 {{ (100 - market_signals_us.vix_pct_rank) | round(1) }}%
+        </span>
+        {% endif %}
+      </div>
+      <div class="text-3xl font-bold
+        {% if market_signals_us.vix_signal %}text-rose-700{% elif market_signals_us.vix_value > 20 %}text-amber-600{% else %}text-emerald-600{% endif %} mb-1">
+        {{ market_signals_us.vix_value }}
+      </div>
+      <div class="text-xs text-slate-400 space-y-0.5">
+        <div>경보 기준: {{ market_signals_us.vix_threshold }} 이상 (역사적 상위 20%)</div>
+        <div class="text-slate-500 mt-1">VIX &lt; 20: 저변동성(안정) · 20~30: 중간 · &gt; 30: 고공포</div>
+      </div>
+    </div>
+
+    {# 수익률 곡선 카드 #}
+    <div class="bg-white rounded-lg shadow-sm p-4 border-l-4
+      {% if market_signals_us.inversion_signal %}border-rose-400{% else %}border-slate-200{% endif %}">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="font-semibold text-slate-700">10Y-3M 수익률 곡선</span>
+        {% if market_signals_us.inversion_signal %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-700">
+          ⚠ 역전 {{ market_signals_us.inversion_days }}일째
+        </span>
+        {% endif %}
+      </div>
+      <div class="text-3xl font-bold
+        {% if market_signals_us.spread < 0 %}text-rose-700{% elif market_signals_us.spread < 0.5 %}text-amber-600{% else %}text-emerald-600{% endif %} mb-1">
+        {{ '%+.3f' | format(market_signals_us.spread) }}%
+      </div>
+      <div class="text-xs text-slate-400 space-y-0.5">
+        <div>spread = 미국채 10년 - 3개월 금리</div>
+        <div class="text-slate-500 mt-1">음수(역전) → 경기침체 선행 지표 (평균 6~18개월 후)</div>
+      </div>
+    </div>
+  </div>
+
+  {# VIX 차트 + 수익률 차트 #}
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+    {# VIX 차트 + 테이블 #}
+    <div class="bg-white rounded-lg shadow-sm p-4">
+      <div class="font-semibold text-slate-700 mb-3">VIX 공포 지수</div>
+
+      {# 3개월 SVG 막대 차트 #}
+      {% if market_signals_us.vix_chart %}
+      <div class="mb-4">
+        <div class="text-xs text-slate-400 mb-1">3개월 추이
+          <span class="inline-block w-3 h-2 bg-rose-300 rounded-sm align-middle ml-1"></span> 공포
+          <span class="inline-block w-3 h-2 bg-amber-200 rounded-sm align-middle ml-1"></span> 주의
+          <span class="inline-block w-3 h-2 bg-emerald-200 rounded-sm align-middle ml-1"></span> 안정
+          &nbsp;|&nbsp; 경보선: {{ market_signals_us.vix_threshold }}
+        </div>
+        {% set max_vix = market_signals_us.vix_chart | map(attribute='vix') | max %}
+        {% set n_bars = market_signals_us.vix_chart | length %}
+        <svg class="w-full h-20 block" viewBox="0 0 {{ n_bars }} 100" preserveAspectRatio="none">
+          {# 경보 기준선 #}
+          {% if max_vix > 0 %}
+          {% set thr_y = (100 - market_signals_us.vix_threshold / max_vix * 90) | round(1) %}
+          <line x1="0" y1="{{ thr_y }}" x2="{{ n_bars }}" y2="{{ thr_y }}"
+                stroke="#f87171" stroke-width="0.5" stroke-dasharray="2,1" />
+          {% endif %}
+          {% for d in market_signals_us.vix_chart %}
+          {% set h = (d.vix / max_vix * 90) | round(1) if max_vix > 0 else 3 %}
+          <rect x="{{ loop.index0 + 0.05 }}" y="{{ (100 - h) | round(1) }}"
+                width="0.9" height="{{ [h, 2] | max }}"
+                fill="{% if d.alert %}#f87171{% elif d.vix >= 20 %}#fde68a{% else %}#6ee7b7{% endif %}">
+            <title>{{ d.date }}: VIX {{ d.vix }}</title>
+          </rect>
+          {% endfor %}
+        </svg>
+        <div class="flex justify-between text-xs text-slate-400 mt-0.5">
+          <span>← 3개월 전</span><span>오늘 →</span>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="font-semibold text-slate-700 mb-1 text-xs text-slate-500">최근 1개월 (최신순)</div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-slate-50 text-slate-500">
+            <tr>
+              <th class="text-left px-3 py-2">날짜</th>
+              <th class="text-right px-3 py-2">VIX</th>
+              <th class="text-right px-3 py-2">경보기준</th>
+              <th class="text-left px-3 py-2">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in market_signals_us.vix_table %}
+            <tr class="border-t {% if d.alert %}bg-rose-50{% endif %}">
+              <td class="px-3 py-1.5 font-mono {% if loop.first %}font-semibold{% endif %}">{{ d.date }}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums font-semibold
+                {% if d.vix >= 30 %}text-rose-700{% elif d.vix >= 20 %}text-amber-600{% else %}text-emerald-600{% endif %}">
+                {{ d.vix }}
+              </td>
+              <td class="px-3 py-1.5 text-right text-slate-400">{{ market_signals_us.vix_threshold }}</td>
+              <td class="px-3 py-1.5">
+                {% if d.alert %}<span class="text-rose-600 font-semibold">⚠ 공포</span>
+                {% elif d.vix >= 20 %}<span class="text-amber-600">주의</span>
+                {% else %}<span class="text-emerald-600">안정</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# 수익률 곡선 차트 + 테이블 #}
+    <div class="bg-white rounded-lg shadow-sm p-4">
+      <div class="font-semibold text-slate-700 mb-3">미국채 수익률 곡선 (10Y - 3M)</div>
+
+      {# 3개월 Spread SVG 라인 차트 #}
+      {% if market_signals_us.yield_chart %}
+      <div class="mb-4">
+        <div class="text-xs text-slate-400 mb-1">3개월 Spread 추이 (10Y−3M, %)
+          <span class="inline-block w-4 border-t-2 border-rose-400 align-middle ml-1"></span> 역전(음수)
+          <span class="inline-block w-4 border-t-2 border-emerald-400 align-middle ml-1"></span> 정상(양수)
+        </div>
+        {% set spreads = market_signals_us.yield_chart | selectattr('spread') | map(attribute='spread') | list %}
+        {% if spreads %}
+        {% set sp_max = spreads | max %}
+        {% set sp_min = spreads | min %}
+        {% set sp_range = (sp_max - sp_min) or 0.001 %}
+        {% set n_pts = market_signals_us.yield_chart | length %}
+        <svg class="w-full h-20 block" viewBox="0 0 {{ n_pts }} 100" preserveAspectRatio="none">
+          {# 0 기준선 #}
+          {% set zero_y = (100 - (0 - sp_min) / sp_range * 80 - 10) | round(1) %}
+          <line x1="0" y1="{{ zero_y }}" x2="{{ n_pts }}" y2="{{ zero_y }}"
+                stroke="#94a3b8" stroke-width="0.5" stroke-dasharray="2,1" />
+          {# Spread 꺾은선 #}
+          <polyline
+            points="{% for d in market_signals_us.yield_chart %}{% if d.spread is not none %}{{ loop.index0 + 0.5 }},{{ (100 - (d.spread - sp_min) / sp_range * 80 - 10) | round(1) }} {% endif %}{% endfor %}"
+            fill="none" stroke="#6366f1" stroke-width="0.8" />
+          {# 역전 구간 강조 (spread < 0) #}
+          {% for d in market_signals_us.yield_chart %}
+          {% if d.inverted and d.spread is not none %}
+          {% set cy = (100 - (d.spread - sp_min) / sp_range * 80 - 10) | round(1) %}
+          <circle cx="{{ loop.index0 + 0.5 }}" cy="{{ cy }}" r="0.8" fill="#f87171">
+            <title>{{ d.date }}: spread={{ d.spread }}</title>
+          </circle>
+          {% endif %}
+          {% endfor %}
+        </svg>
+        <div class="flex justify-between text-xs text-slate-400 mt-0.5">
+          <span>← 3개월 전</span><span>오늘 →</span>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <div class="text-xs text-slate-500 mb-1">최근 1개월 (최신순)</div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-xs">
+          <thead class="bg-slate-50 text-slate-500">
+            <tr>
+              <th class="text-left px-3 py-2">날짜</th>
+              <th class="text-right px-3 py-2">10Y (%)</th>
+              <th class="text-right px-3 py-2">3M (%)</th>
+              <th class="text-right px-3 py-2">Spread</th>
+              <th class="text-left px-3 py-2">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for d in market_signals_us.yield_table %}
+            <tr class="border-t {% if d.inverted %}bg-rose-50{% endif %}">
+              <td class="px-3 py-1.5 font-mono {% if loop.first %}font-semibold{% endif %}">{{ d.date }}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{{ d.y10 if d.y10 else '—' }}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums">{{ d.y3m if d.y3m else '—' }}</td>
+              <td class="px-3 py-1.5 text-right tabular-nums font-semibold
+                {% if d.inverted %}text-rose-700{% elif d.spread and d.spread < 0.5 %}text-amber-600{% else %}text-emerald-600{% endif %}">
+                {% if d.spread is not none %}{{ '%+.3f' | format(d.spread) }}{% else %}—{% endif %}
+              </td>
+              <td class="px-3 py-1.5">
+                {% if d.inverted %}<span class="text-rose-600 font-semibold">⚠ 역전</span>
+                {% else %}<span class="text-emerald-600">정상</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  {# 용어 설명 #}
+  <details class="bg-white rounded-lg shadow-sm">
+    <summary class="px-4 py-3 cursor-pointer font-semibold text-slate-700 select-none flex items-center gap-2">
+      <span>📖 지표 설명 — VIX &amp; 수익률 곡선</span>
+      <span class="ml-auto text-xs text-slate-400 font-normal">접기/펼치기</span>
+    </summary>
+    <div class="px-4 pb-4 grid grid-cols-1 xl:grid-cols-2 gap-4 text-sm text-slate-600">
+      <div class="space-y-2">
+        <h3 class="font-semibold text-slate-800">VIX (CBOE 변동성 지수)</h3>
+        <p>S&amp;P500 옵션 가격에서 추출한 <strong>향후 30일 시장 변동성 예상치</strong>입니다.
+          "공포 지수"라고도 불리며, 시장 참여자들이 얼마나 불안해하는지를 나타냅니다.</p>
+        <ul class="list-disc list-inside space-y-1 text-xs text-slate-500">
+          <li>VIX &lt; 20: 저변동성 / 안정 — 강세 시장 경향</li>
+          <li>VIX 20~30: 중간 불안 — 주의 구간</li>
+          <li>VIX &gt; 30: 고공포 — 급락·패닉 국면. 역설적으로 저점 매수 기회이기도 함</li>
+          <li>VIX &gt; 40: 극도의 공포 (2008, 2020 코로나 수준)</li>
+        </ul>
+        <p class="text-xs text-slate-400 bg-slate-50 rounded p-2">📌 출처: yfinance <code>^VIX</code> (CBOE Volatility Index)</p>
+      </div>
+      <div class="space-y-2">
+        <h3 class="font-semibold text-slate-800">수익률 곡선 역전 (Yield Curve Inversion)</h3>
+        <p>통상 10년 국채 금리 &gt; 3개월 국채 금리인데, 이 관계가 뒤집히면(역전)
+          <strong>경기침체 선행 신호</strong>로 해석됩니다.</p>
+        <ul class="list-disc list-inside space-y-1 text-xs text-slate-500">
+          <li>10Y - 3M spread &lt; 0: 역전 상태 — 단기 금리 &gt; 장기 금리</li>
+          <li>역사적으로 역전 후 평균 6~18개월 내 경기침체 진입</li>
+          <li>2022~2023년 역전은 2024년 경기 둔화와 연결됨</li>
+          <li>역전이 해소(정상화)될 때가 오히려 경기침체 직전인 경우도 있음</li>
+        </ul>
+        <p class="text-xs text-slate-400 bg-slate-50 rounded p-2">📌 출처: yfinance <code>^TNX</code> (10Y) · <code>^IRX</code> (3M Treasury)</p>
+      </div>
+    </div>
+  </details>
+
+  <p class="text-xs text-slate-400">
+    데이터: yfinance (^VIX, ^TNX, ^IRX) · 갱신: <code>make v2-market-signals-us</code>
+  </p>
+
+{% else %}
+  <div class="bg-white rounded-lg shadow-sm p-8 text-center text-slate-400">
+    US 시장 시그널 데이터 없음 — <code>make v2-market-signals-us</code> 실행 후 대시보드를 재생성하세요.
+  </div>
+{% endif %}
+</div>{# end US tab #}
 
 </main>
 </body>

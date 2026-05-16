@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕯️</text></svg>">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>거래 이력 — Candle</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="border-b bg-white">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold" id="page-title">거래 이력 — Candle</h1>
+      <p class="text-xs text-slate-500" id="page-sub">종목 로딩 중...</p>
+    </div>
+    <a href="javascript:history.back()" class="text-sm text-slate-500 hover:underline">← 뒤로</a>
+  </div>
+</header>
+
+{% include "_nav.html" %}
+
+<main class="max-w-7xl mx-auto p-4 space-y-6" id="main-content">
+  <div class="text-center py-12 text-slate-400" id="loading-msg">데이터 로딩 중...</div>
+</main>
+
+<script>
+(function () {
+  const ticker = (window.location.hash || '').replace(/^#/, '') || new URLSearchParams(window.location.search).get('t') || '';
+  if (!ticker) {
+    document.getElementById('loading-msg').textContent = 'URL에 종목 코드가 없습니다. 예: ticker_trades.html#005930';
+    return;
+  }
+
+  fetch(`data/trades/${encodeURIComponent(ticker)}.json`)
+    .then(r => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    })
+    .then(data => renderTrades(data))
+    .catch(err => {
+      const isNotFound = err.message.includes('404') || err.message.includes('Not Found');
+      const msg = isNotFound
+        ? `거래 데이터 없음 (${ticker}) — 백테스트가 실행되지 않은 종목입니다. make v2-backtest 후 make v2-dashboard를 실행하세요.`
+        : `데이터 로드 실패: ${err.message}`;
+      const el = document.getElementById('loading-msg');
+      el.textContent = msg;
+      el.className = 'text-amber-600 bg-amber-50 rounded p-4 text-sm';
+    });
+
+  function fmtNum(v) {
+    if (v == null) return '—';
+    const n = parseFloat(v);
+    if (isNaN(n)) return '—';
+    return n.toLocaleString('ko-KR', { maximumFractionDigits: 2 });
+  }
+  function fmtPct(v) {
+    if (v == null) return '—';
+    const n = parseFloat(v);
+    if (isNaN(n)) return '—';
+    return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+  }
+  function pctClass(v) {
+    if (v == null) return 'text-slate-400';
+    return parseFloat(v) >= 0 ? 'text-emerald-700' : 'text-rose-700';
+  }
+
+  function buildSummary(types) {
+    const rows = [];
+    for (const [tname, trades] of Object.entries(types)) {
+      const buys = trades.filter(t => t.side === 'buy');
+      const sells = trades.filter(t => t.side === 'sell');
+      let wins = 0, losses = 0, holdDays = [];
+      sells.forEach(sell => {
+        const prevBuys = buys.filter(b => b.date <= sell.date);
+        if (!prevBuys.length) return;
+        const lb = prevBuys[prevBuys.length - 1];
+        const bp = parseFloat(lb.price || 0);
+        const sp = parseFloat(sell.price || 0);
+        if (bp > 0) { if (sp >= bp) wins++; else losses++; }
+        const bd = new Date(lb.date), sd = new Date(sell.date);
+        const diff = Math.round((sd - bd) / 86400000);
+        if (diff >= 0) holdDays.push(diff);
+      });
+      const total = wins + losses;
+      const wr = total ? (wins / total * 100).toFixed(1) : null;
+      const ah = holdDays.length ? Math.round(holdDays.reduce((a,b) => a+b, 0) / holdDays.length) : null;
+      // MDD from equity vals
+      const eqVals = trades.map(t => {
+        const hv = parseFloat(t.holding_value || 0);
+        const c  = parseFloat(t.cash || 0);
+        return !isNaN(c) && c > 0 ? hv + c : hv;
+      });
+      let peak = eqVals[0] || 0, maxDD = 0;
+      eqVals.forEach(v => {
+        if (v > peak) peak = v;
+        if (peak > 0) { const dd = (peak - v) / peak * 100; if (dd > maxDD) maxDD = dd; }
+      });
+      const lastTrade = trades[trades.length - 1];
+      const returnPct = lastTrade ? (lastTrade.return_pct != null ? parseFloat(lastTrade.return_pct) : null) : null;
+
+      rows.push({ tname, buys: buys.length, sells: sells.length,
+        winRate: wr, avgHold: ah, mdd: maxDD.toFixed(1),
+        returnPct, totalTrades: trades.length });
+    }
+    return rows;
+  }
+
+  function renderTrades(data) {
+    document.getElementById('page-title').textContent = `거래 이력 — ${data.ticker} ${data.name || ''}`;
+    document.getElementById('page-sub').textContent = `그룹: ${data.group_name || ''} · 통화: ${data.currency || ''}`;
+
+    const main = document.getElementById('main-content');
+    main.innerHTML = '';
+
+    const types = data.types || {};
+    if (!Object.keys(types).length) {
+      main.innerHTML = '<p class="text-slate-400">거래 데이터 없음</p>';
+      return;
+    }
+
+    // 요약 카드
+    const summaryRows = buildSummary(types);
+    const summaryHtml = `
+      <section class="bg-white rounded-lg shadow-sm p-4">
+        <h2 class="text-base font-semibold mb-3">전략별 요약</h2>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead class="bg-slate-100 text-slate-600 text-xs">
+              <tr>
+                <th class="text-left px-3 py-2">전략</th>
+                <th class="text-right px-3 py-2">매수</th>
+                <th class="text-right px-3 py-2">매도</th>
+                <th class="text-right px-3 py-2">최종 수익률</th>
+                <th class="text-right px-3 py-2 text-amber-700">MDD (%)</th>
+                <th class="text-right px-3 py-2 text-sky-700">승률 (%)</th>
+                <th class="text-right px-3 py-2">보유일</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${summaryRows.map(r => {
+                const retCls = r.returnPct != null ? (r.returnPct >= 0 ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold') : 'text-slate-300';
+                const mddCls = parseFloat(r.mdd) <= 10 ? 'text-emerald-600' : parseFloat(r.mdd) <= 25 ? 'text-amber-600' : 'text-rose-700';
+                const wrCls = r.winRate != null ? (parseFloat(r.winRate) >= 60 ? 'text-emerald-600' : parseFloat(r.winRate) >= 40 ? 'text-amber-600' : 'text-rose-700') : 'text-slate-300';
+                return `<tr class="border-t">
+                  <td class="px-3 py-2 font-mono font-semibold">${r.tname}</td>
+                  <td class="px-3 py-2 text-right">${r.buys}</td>
+                  <td class="px-3 py-2 text-right">${r.sells}</td>
+                  <td class="px-3 py-2 text-right tabular-nums ${retCls}">${r.returnPct != null ? fmtPct(r.returnPct) : '—'}</td>
+                  <td class="px-3 py-2 text-right tabular-nums ${mddCls}">${r.mdd}%</td>
+                  <td class="px-3 py-2 text-right tabular-nums ${wrCls}">${r.winRate != null ? r.winRate + '%' : '—'}</td>
+                  <td class="px-3 py-2 text-right text-slate-500">${r.avgHold != null ? r.avgHold + '일' : '—'}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </section>`;
+    main.insertAdjacentHTML('beforeend', summaryHtml);
+
+    // 전략별 상세 거래 테이블
+    for (const [tname, trades] of Object.entries(types)) {
+      const btn_id = `btn-${tname}`;
+      const tbl_id = `tbl-${tname}`;
+      const rows = trades.map(t => {
+        const sideCls = t.side === 'buy' ? 'text-emerald-700 font-semibold' :
+                        t.side === 'sell' ? 'text-rose-700 font-semibold' : 'text-slate-400 italic';
+        const retCls = pctClass(t.return_pct);
+        return `<tr class="border-t hover:bg-slate-50">
+          <td class="px-3 py-1.5 font-mono text-xs">${t.date}</td>
+          <td class="px-3 py-1.5 text-xs ${sideCls}">${t.side}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.price)}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.qty)}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.amount)}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.holding_qty)}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.holding_value)}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-xs">${t.cash != null ? fmtNum(t.cash) : '—'}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-xs ${retCls}">${t.return_pct != null ? fmtPct(t.return_pct) : '—'}</td>
+        </tr>`;
+      }).join('');
+
+      const sectionHtml = `
+        <section class="bg-white rounded-lg shadow-sm p-4">
+          <div class="flex items-center justify-between mb-2">
+            <h2 class="text-sm font-semibold font-mono">${tname} — 거래 상세 (${trades.length}건)</h2>
+            <button id="${btn_id}" onclick="toggleTable('${tbl_id}','${btn_id}')"
+                    class="text-xs px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600">
+              펼치기 ▼
+            </button>
+          </div>
+          <div id="${tbl_id}" class="hidden overflow-x-auto">
+            <table class="min-w-full text-xs border-collapse">
+              <thead class="bg-slate-100 text-slate-500">
+                <tr>
+                  <th class="text-left px-3 py-2">날짜</th>
+                  <th class="text-left px-3 py-2">구분</th>
+                  <th class="text-right px-3 py-2">가격</th>
+                  <th class="text-right px-3 py-2">수량</th>
+                  <th class="text-right px-3 py-2">금액</th>
+                  <th class="text-right px-3 py-2">보유수량</th>
+                  <th class="text-right px-3 py-2">보유가치</th>
+                  <th class="text-right px-3 py-2">현금</th>
+                  <th class="text-right px-3 py-2">수익률</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </section>`;
+      main.insertAdjacentHTML('beforeend', sectionHtml);
+    }
+
+    const footer = `<p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>`;
+    main.insertAdjacentHTML('beforeend', footer);
+  }
+
+  window.toggleTable = function(tblId, btnId) {
+    const tbl = document.getElementById(tblId);
+    const btn = document.getElementById(btnId);
+    if (tbl.classList.contains('hidden')) {
+      tbl.classList.remove('hidden');
+      btn.textContent = '접기 ▲';
+    } else {
+      tbl.classList.add('hidden');
+      btn.textContent = '펼치기 ▼';
+    }
+  };
+})();
+</script>
+
+</body>
+</html>

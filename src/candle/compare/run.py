@@ -22,6 +22,88 @@ log = logging.getLogger(__name__)
 
 CASH_TRACKING_TYPES = {"type1_2", "type2_2", "type2_2b", "type3"}
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 리스크 지표 헬퍼
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _win_rate_and_hold(grp: pd.DataFrame) -> tuple[float | None, float | None]:
+    """Buy/sell 페어링으로 승률(%) 및 평균 보유일 계산."""
+    buys  = grp[grp["side"] == "buy"].copy()
+    sells = grp[grp["side"] == "sell"].copy()
+    if buys.empty or sells.empty:
+        return None, None
+    buys["_ts"]  = pd.to_datetime(buys["date"],  errors="coerce")
+    sells["_ts"] = pd.to_datetime(sells["date"], errors="coerce")
+    wins, losses, hold_list = 0, 0, []
+    for _, sell in sells.iterrows():
+        prev = buys[buys["_ts"] <= sell["_ts"]]
+        if prev.empty:
+            continue
+        last = prev.iloc[-1]
+        bp = float(pd.to_numeric(last.get("price", 0), errors="coerce") or 0)
+        sp = float(pd.to_numeric(sell.get("price", 0), errors="coerce") or 0)
+        if bp > 0:
+            if sp >= bp:
+                wins += 1
+            else:
+                losses += 1
+        days = int((sell["_ts"] - last["_ts"]).days)
+        if days >= 0:
+            hold_list.append(days)
+    total = wins + losses
+    wr = round(wins / total * 100, 1) if total else None
+    ah = round(sum(hold_list) / len(hold_list)) if hold_list else None
+    return wr, ah
+
+
+def _mdd_from_trades(grp: pd.DataFrame, type_name: str) -> float | None:
+    """Trade ledger에서 자산 곡선을 만들어 최대 낙폭(MDD, %) 계산."""
+    is_cash = type_name in CASH_TRACKING_TYPES
+    vals: list[float] = []
+    for _, row in grp.sort_values("date").iterrows():
+        hv = float(pd.to_numeric(row.get("holding_value", 0), errors="coerce") or 0)
+        if is_cash:
+            c_raw = row.get("cash")
+            c = float(pd.to_numeric(c_raw, errors="coerce") or 0) \
+                if (c_raw is not None and not pd.isna(c_raw)) else 0.0
+            vals.append(hv + c)
+        else:
+            vals.append(hv)
+    if len(vals) < 2:
+        return None
+    peak, max_dd = vals[0], 0.0
+    for v in vals:
+        if v > peak:
+            peak = v
+        if peak > 0:
+            dd = (peak - v) / peak * 100
+            if dd > max_dd:
+                max_dd = dd
+    return round(max_dd, 2)
+
+
+def _compute_risk_map(
+    trades_df: pd.DataFrame,
+    type_names: list[str],
+) -> dict[tuple[str, str], dict]:
+    """(type, ticker) → {win_rate, avg_hold_days, mdd} 매핑."""
+    risk: dict[tuple[str, str], dict] = {}
+    if trades_df.empty:
+        return risk
+    for t in type_names:
+        subset = trades_df[trades_df["type"] == t]
+        if subset.empty:
+            continue
+        for ticker, grp in subset.groupby("ticker"):
+            wr, ah = _win_rate_and_hold(grp)
+            mdd    = _mdd_from_trades(grp, t)
+            risk[(t, str(ticker))] = {
+                "win_rate": wr,
+                "avg_hold_days": ah,
+                "mdd": mdd,
+            }
+    return risk
+
 
 def run(cfg: config.Config, type_names: Iterable[str],
         debug: bool = False, period: str | None = None) -> dict[str, int]:
@@ -92,7 +174,10 @@ def run(cfg: config.Config, type_names: Iterable[str],
     if debug:
         print("[compare][debug] step 1/4 strategy_summary", flush=True)
     _step_t0 = time.perf_counter()
-    strategy_rows = _strategy_summary(cfg, summary_df, trades_df)
+    risk_map = _compute_risk_map(trades_df, type_list)
+    tprint(f"[compare] risk_map 완료 — {len(risk_map)}개 (type,ticker) 조합", flush=True)
+
+    strategy_rows = _strategy_summary(cfg, summary_df, trades_df, risk_map)
     strategy_csv = pd.DataFrame(strategy_rows)
     csv_io.atomic_write(strategy_csv, out_dir / "strategy_summary.csv")
     _print_strategy(strategy_csv)
@@ -103,7 +188,7 @@ def run(cfg: config.Config, type_names: Iterable[str],
     if debug:
         print("[compare][debug] step 2/4 per_ticker", flush=True)
     _step_t0 = time.perf_counter()
-    pt = _per_ticker(summary_df)
+    pt = _per_ticker(summary_df, risk_map)
     csv_io.atomic_write(pt, out_dir / "per_ticker.csv")
     tprint(f"[compare] step 2/4 완료 — elapsed={time.perf_counter()-_step_t0:.1f}s", flush=True)
 
@@ -136,7 +221,8 @@ def run(cfg: config.Config, type_names: Iterable[str],
 
 
 def _strategy_summary(cfg: config.Config, summary_df: pd.DataFrame,
-                      trades_df: pd.DataFrame) -> list[dict]:
+                      trades_df: pd.DataFrame,
+                      risk_map: dict | None = None) -> list[dict]:
     """전략 × 그룹 단위 집계 + TOTAL 행.
 
     group_name 은 instruments.csv 에서 lookup.
@@ -183,6 +269,19 @@ def _strategy_summary(cfg: config.Config, summary_df: pd.DataFrame,
             pnl = total_asset - buy_amount
             ret_pct = (pnl / buy_amount * 100.0) if buy_amount else 0.0
 
+        # 리스크 지표 집계 (ticker 단위 평균)
+        tickers_in_grp = set(grp["ticker"].astype(str))
+        rm = risk_map or {}
+        mdd_vals = [rm[(type_name, tk)]["mdd"]
+                    for tk in tickers_in_grp
+                    if (type_name, tk) in rm and rm[(type_name, tk)]["mdd"] is not None]
+        wr_vals  = [rm[(type_name, tk)]["win_rate"]
+                    for tk in tickers_in_grp
+                    if (type_name, tk) in rm and rm[(type_name, tk)]["win_rate"] is not None]
+        ah_vals  = [rm[(type_name, tk)]["avg_hold_days"]
+                    for tk in tickers_in_grp
+                    if (type_name, tk) in rm and rm[(type_name, tk)]["avg_hold_days"] is not None]
+
         return {
             "tickers": n_tickers,
             "총자산": round(total_asset, 4),
@@ -193,6 +292,9 @@ def _strategy_summary(cfg: config.Config, summary_df: pd.DataFrame,
             "수익률": round(ret_pct, 4),
             "매수횟수": buy_cnt,
             "매도횟수": sell_cnt,
+            "avg_mdd":       round(sum(mdd_vals) / len(mdd_vals), 2) if mdd_vals else None,
+            "avg_win_rate":  round(sum(wr_vals)  / len(wr_vals),  1) if wr_vals  else None,
+            "avg_hold_days": round(sum(ah_vals)  / len(ah_vals))     if ah_vals  else None,
         }
 
     # 그룹별 집계
@@ -225,8 +327,9 @@ def _sum_buy_amount(trades_df: pd.DataFrame, type_name: str, currency: str,
     return float(pd.to_numeric(df["amount"], errors="coerce").fillna(0).sum())
 
 
-def _per_ticker(summary_df: pd.DataFrame) -> pd.DataFrame:
-    """ticker × strategy cross. 각 셀 = 수익률(%)."""
+def _per_ticker(summary_df: pd.DataFrame,
+                risk_map: dict | None = None) -> pd.DataFrame:
+    """ticker × strategy cross. 각 셀 = 수익률(%). 리스크 지표 컬럼 추가."""
     if summary_df.empty:
         return pd.DataFrame()
     pivot = summary_df.pivot_table(
@@ -235,9 +338,22 @@ def _per_ticker(summary_df: pd.DataFrame) -> pd.DataFrame:
         values="return_pct",
         aggfunc="first",
     ).reset_index()
-    # 수익률 평균 칼럼 + 정렬
+    # 수익률 평균 칼럼
     type_cols = [c for c in pivot.columns if c not in ("ticker", "name", "currency")]
     pivot["avg_return"] = pivot[type_cols].mean(axis=1, numeric_only=True)
+
+    # 리스크 지표: ticker × 전 type 평균
+    rm = risk_map or {}
+    def _avg_risk(ticker: str, field: str) -> float | None:
+        vals = [rm[(t, ticker)][field]
+                for t in type_cols
+                if (t, ticker) in rm and rm[(t, ticker)][field] is not None]
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    pivot["avg_mdd"]        = pivot["ticker"].astype(str).apply(lambda tk: _avg_risk(tk, "mdd"))
+    pivot["avg_win_rate"]   = pivot["ticker"].astype(str).apply(lambda tk: _avg_risk(tk, "win_rate"))
+    pivot["avg_hold_days"]  = pivot["ticker"].astype(str).apply(lambda tk: _avg_risk(tk, "avg_hold_days"))
+
     pivot = pivot.sort_values("avg_return", ascending=False).reset_index(drop=True)
     return pivot
 

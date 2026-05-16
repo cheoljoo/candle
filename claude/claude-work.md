@@ -823,3 +823,46 @@
   0  9 * * 2-6  /home/cheoljoo/code/candle/candle.sh us >> /tmp/candle-us-cron.log 2>&1
   ```
 - **검증** : `bash -n candle.sh` → syntax OK 확인
+
+---
+
+## 2026-05-16
+
+### Feature 3: 리스크 지표 도입 (MDD·승률·평균보유일)
+- **무엇을** : `compare/run.py`에 `_win_rate_and_hold()`, `_mdd_from_trades()`, `_compute_risk_map()` 추가. `_strategy_summary()`에 `avg_mdd`, `avg_win_rate`, `avg_hold_days` 컬럼 추가. `_per_ticker()`에 종목별 리스크 지표 평균 추가.
+- **템플릿** : `compare.html` 테이블 헤더·행에 MDD(색상: ≤10%=초록, ≤25%=주황, >25%=빨강), 승률(≥60%=초록), 보유일 컬럼 추가.
+- **접근법** : MDD는 trade ledger의 holding_value(+cash for cash-tracking types)로 equity curve 구성 → peak 대비 낙폭 최대값. 승률은 직전 buy row와 sell row를 페어링해 sell_price ≥ buy_price 여부 판정.
+
+### Feature 8: 백테스트 거래 상세 페이지
+- **무엇을** : `render.py`에 `_generate_trade_jsons()` 추가 → `dashboard_site/data/trades/{ticker}.json` 생성 (full period 우선). `ticker_trades.html` 신규 템플릿 (hash URL: `ticker_trades.html#005930`). `group_returns.html` 상세 행에 "📋 거래 이력 상세 →" 링크 추가. `_nav.html`에 "거래 이력" 메뉴 추가.
+- **구조** : 정적 HTML 셸 + JS fetch(`data/trades/{ticker}.json`) → 요약 카드(전략별 MDD/승률/보유일) + 접기/펼치기 거래 상세 테이블.
+
+### Feature 10: 미국 시장 시그널 (VIX + 미국채 수익률)
+- **무엇을** : `fetch/market_signals_us.py` 신규 (yfinance `^VIX`, `^TNX`, `^IRX`). VIX 퍼센타일 경보 + 10Y-3M spread 역전 시그널. `cli.py`에 `candle market-signals-us` 추가. `render.py`에 `_load_market_signals_us()` + `_load_foreign_snapshot()`. `market_signals.html`에 KR/US Alpine.js 탭 추가. `Makefile`에 `v2-market-signals-us` 타겟 추가.
+
+### Feature 13: 외국인/기관 종목별 매매 (KOSPI200)
+- **무엇을** : `fetch/foreign_trading.py` 신규 — pykrx `get_market_trading_value_by_date` per-ticker. ThreadPoolExecutor 병렬 수집. `load_latest_snapshot()` 헬퍼. `cli.py`에 `candle foreign-trading` 추가. `Makefile`에 `v2-foreign-trading` 타겟. `render.py`에 `_load_foreign_snapshot()` + `group_ctx["foreign_snapshot"]`. `group_returns.html` 상세 행에 KOSPI200 종목 외국인/기관 5일 순매수 합산 표시.
+
+### Feature 8 수정 — 거래 이력 링크 정확도 개선
+- **문제** : KOSPI200 종목 클릭 시 "HTTP 404" 오류 — 해당 종목의 backtest `_all.csv` 데이터가 없으면 `data/trades/{ticker}.json` 파일이 생성되지 않아 fetch 실패.
+- **원인** : `_generate_trade_jsons()`는 `output/backtest/full/{type}/_all.csv`에 있는 종목만 JSON 생성. backtest가 부분 실행된 경우 일부 KOSPI200 종목이 누락됨.
+- **수정**
+  - `render.py`: `_generate_trade_jsons()` 호출을 group_returns 렌더 **전**으로 이동. 실행 후 `tickers_with_trades = {p.stem for p in trades_dir.glob("*.json")}` 집합 구성.
+  - `group_returns.html`: `row.ticker in tickers_with_trades` 조건으로 링크 표시 여부 분기. 없으면 "거래 이력 없음 (백테스트 데이터 필요)" 텍스트 표시.
+  - `ticker_trades.html`: 404 catch 시 "백테스트가 실행되지 않은 종목" 안내 메시지로 개선.
+
+### UI 개선 — compare.html MDD·승률 설명 섹션
+- **수정** : `compare.html` 테이블 상단에 `<details open>` 섹션 추가.
+  - MDD: 개념·색상 기준(≤10%초록/10~25%주황/>25%빨강)·활용법
+  - 승률: 개념·색상 기준(≥60%초록)·주의사항(승률 단독 판단 금지)
+  - 평균 보유일: 개념·type별 특성·계산 방식
+
+### UI 개선 — 거래 이력 nav 메뉴 제거
+- **사유** : `ticker_trades.html`은 URL 해시(`#ticker`)가 있어야 동작. 독립 메뉴로 진입 시 항상 빈 화면 → 불필요.
+- **수정** : `_nav.html`에서 "거래 이력" 링크 삭제. group_returns 상세 행의 "📋 거래 이력 상세 →" 링크(backtest 데이터 보유 종목만)로만 접근 가능.
+
+### Feature 10 보완 — US 시장 시그널 SVG 차트 추가
+- **수정** : `market_signals.html` US 탭에 3개월 SVG 차트 2종 추가.
+  - VIX 막대 차트: 경보 기준선(빨강 점선) + 공포(빨강)/주의(노랑)/안정(초록) 색상 바.
+  - Spread 꺾은선 차트: 10Y-3M spread, 0 기준선(회색 점선), 역전 구간 포인트(빨강 원).
+

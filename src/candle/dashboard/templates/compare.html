@@ -30,6 +30,69 @@
 
 <main class="max-w-7xl mx-auto p-4 space-y-6">
 
+  {# ── 리스크 지표 설명 ─────────────────────────────────────────────────── #}
+  <details class="bg-white rounded-lg shadow-sm" open>
+    <summary class="px-4 py-3 cursor-pointer font-semibold text-slate-700 select-none flex items-center gap-2">
+      <span>📊 리스크 지표 설명 — MDD &amp; 승률 &amp; 평균 보유일</span>
+      <span class="ml-auto text-xs text-slate-400 font-normal">접기/펼치기</span>
+    </summary>
+    <div class="px-4 pb-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-slate-600">
+
+      <div class="space-y-2">
+        <h3 class="font-semibold text-amber-700 flex items-center gap-1">
+          <span class="inline-block w-2.5 h-2.5 rounded-sm bg-amber-400"></span>
+          MDD — 최대 낙폭 (Max Drawdown)
+        </h3>
+        <p>백테스트 기간 중 <strong>고점 대비 최대로 떨어진 비율(%)</strong>입니다. 전략의 "최악의 순간"을 나타냅니다.</p>
+        <ul class="list-disc list-inside space-y-1 text-xs text-slate-500">
+          <li><span class="text-emerald-600 font-semibold">≤ 10% 초록</span> — 방어적·안정적 전략</li>
+          <li><span class="text-amber-600 font-semibold">10~25% 주황</span> — 보통 수준의 낙폭</li>
+          <li><span class="text-rose-600 font-semibold">&gt; 25% 빨강</span> — 큰 낙폭, 버티기 어려움</li>
+        </ul>
+        <p class="text-xs text-slate-400 bg-amber-50 rounded p-2">
+          💡 수익률이 같다면 <strong>MDD가 낮은 전략이 우수</strong>.
+          낙폭이 클수록 공황 매도 위험이 높아집니다.
+        </p>
+      </div>
+
+      <div class="space-y-2">
+        <h3 class="font-semibold text-sky-700 flex items-center gap-1">
+          <span class="inline-block w-2.5 h-2.5 rounded-sm bg-sky-400"></span>
+          승률 — Win Rate (%)
+        </h3>
+        <p>전체 매매 중 <strong>매도 시 매입가 대비 수익을 낸 비율(%)</strong>입니다.</p>
+        <ul class="list-disc list-inside space-y-1 text-xs text-slate-500">
+          <li><span class="text-emerald-600 font-semibold">≥ 60% 초록</span> — 우수한 승률</li>
+          <li><span class="text-amber-600 font-semibold">40~60% 주황</span> — 보통 수준</li>
+          <li><span class="text-rose-600 font-semibold">&lt; 40% 빨강</span> — 낮은 승률</li>
+        </ul>
+        <p class="text-xs text-slate-400 bg-sky-50 rounded p-2">
+          ⚠️ 승률이 낮아도 수익이 날 수 있음.
+          예) 승률 40% + 이익이 손실의 3배 = 기대값 양수.
+          <strong>승률만으로 전략 우열을 판단하지 마세요</strong>.
+        </p>
+      </div>
+
+      <div class="space-y-2">
+        <h3 class="font-semibold text-slate-600 flex items-center gap-1">
+          <span class="inline-block w-2.5 h-2.5 rounded-sm bg-slate-400"></span>
+          평균 보유일 (Avg Hold Days)
+        </h3>
+        <p><strong>매수부터 매도까지 평균 며칠 보유</strong>했는지를 나타냅니다.</p>
+        <ul class="list-disc list-inside space-y-1 text-xs text-slate-500">
+          <li>짧을수록: 잦은 매매 → 거래비용·세금 증가</li>
+          <li>길수록: 추세를 충분히 기다리는 전략</li>
+          <li>type1(변곡점): 수개월~수년 / type2(연속일수): 수주~수개월</li>
+        </ul>
+        <p class="text-xs text-slate-400 bg-slate-50 rounded p-2">
+          계산: 각 매도의 직전 매수일 기준 (매도일 − 매수일) 평균.
+          그룹 내 전 종목 평균값으로 표시됩니다.
+        </p>
+      </div>
+
+    </div>
+  </details>
+
   {# ── 전략별 요약 (기간 탭) ──────────────────────────────── #}
   <section class="bg-white rounded-lg shadow-sm p-4"
            x-data="{ cmp_tab: '{{ compare_period_list[0] if compare_period_list else '' }}' }">
@@ -65,6 +128,9 @@
               <th class="text-right px-3 py-2">수익률 (%)</th>
               <th class="text-right px-3 py-2">매수</th>
               <th class="text-right px-3 py-2">매도</th>
+              <th class="text-right px-3 py-2 text-amber-700" title="평균 최대낙폭">MDD (%)</th>
+              <th class="text-right px-3 py-2 text-sky-700" title="평균 승률 (sell 시 매입가 대비 수익)">승률 (%)</th>
+              <th class="text-right px-3 py-2 text-slate-500" title="평균 보유일 (매수→매도)">보유일</th>
             </tr>
           </thead>
           <tbody>
@@ -97,6 +163,23 @@
               </td>
               <td class="px-3 py-2 text-right">{{ r["매수횟수"] }}</td>
               <td class="px-3 py-2 text-right">{{ r["매도횟수"] }}</td>
+              {# MDD: 낮을수록 좋음 (초록), 높을수록 나쁨 (빨강) #}
+              {% set mdd = r.get('avg_mdd') %}
+              <td class="px-3 py-2 text-right tabular-nums
+                {% if mdd is not none %}{% if mdd <= 10 %}text-emerald-600{% elif mdd <= 25 %}text-amber-600{% else %}text-rose-700{% endif %}{% else %}text-slate-300{% endif %}">
+                {% if mdd is not none %}{{ "%.1f"|format(mdd) }}%{% else %}—{% endif %}
+              </td>
+              {# 승률: 높을수록 좋음 #}
+              {% set wr = r.get('avg_win_rate') %}
+              <td class="px-3 py-2 text-right tabular-nums
+                {% if wr is not none %}{% if wr >= 60 %}text-emerald-600{% elif wr >= 40 %}text-amber-600{% else %}text-rose-700{% endif %}{% else %}text-slate-300{% endif %}">
+                {% if wr is not none %}{{ "%.1f"|format(wr) }}%{% else %}—{% endif %}
+              </td>
+              {# 평균 보유일 #}
+              {% set ah = r.get('avg_hold_days') %}
+              <td class="px-3 py-2 text-right tabular-nums text-slate-500">
+                {% if ah is not none %}{{ ah|int }}일{% else %}—{% endif %}
+              </td>
             </tr>
             {% endfor %}
           </tbody>

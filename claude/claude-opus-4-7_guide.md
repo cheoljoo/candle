@@ -1,13 +1,13 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-16 (10차)
+date: 2026-05-17 (11차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-16 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능(Gmail → ETF 자동 등록) 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(프로그램 비차익+금융투자+KOSPI 상관관계) 대시보드 추가. Makefile KR/US 분리 파이프라인(v2-all-kr/v2-all-us) 및 candle.sh 인자 분기 추가.**
+> **2026-05-17 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(KR+US) 대시보드 추가. Makefile KR/US 분리 파이프라인. 리스크 지표(MDD·승률·평균보유일) + 거래 이력 상세 페이지 + 미국 시장 시그널(VIX·수익률 곡선) + KOSPI200 외국인/기관 매매 추가.**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 
@@ -704,12 +704,15 @@ dashboard_site/data/
 | dashboard inflection 스캔 속도 | 중 | 변곡점 lookup이 30초+ (719 ticker × CSV 전체 읽기) → analyze_meta 기반 최적화 가능 |
 | dashboard FastAPI 2차 | 낮 | 수동 입력 폼 UI (현재는 CSV 직접 편집) |
 | v2 market_cap 저장 수정 | 중 | yfinance fast_info 가 현재 None 반환 → US/KR daily CSV 의 market_cap/rank_in_group 비어 있음. dashboard RANK 는 legacy `data/{kospi,sp500}_daily_rank.csv` 로 workaround 중 |
-| 백테스트 편입 전 종목 필터 | 중 | 매수 시점에 KOSPI200/SP500 구성원인 종목만 매수 |
+| 백테스트 편입 전 종목 필터 | 중 | 매수 시점에 KOSPI200/SP500 구성원인 종목만 매수 (survivorship bias 해소) |
 | gmail-etf 피드 연동 | 하 | 신규 ETF 등록 후 `make v2-fetch` 자동 트리거 |
+| 외국인/기관 매매 대시보드 통합 | 중 | `make v2-foreign-trading` 실행 후 KOSPI200 상세 행에 5일 순매수 표시. 현재 pykrx 안정성 의존. |
+| US 시장 시그널 자동 수집 | 중 | `make v2-market-signals-us` 수동 실행 필요 → v2-all 파이프라인 포함 검토 |
+| 보유 포트폴리오 트래커 | 중 | 실제 계좌 입력 → 평가손익·배당 추적. `data/holdings.csv` 기반 |
 
 ---
 
-부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-16 (10차).
+부록: 이 가이드는 `req.md §1.1.1~§1.1.4` + `claude-work.md` 모든 구현 항목을 반영합니다. 마지막 업데이트 2026-05-17 (11차).
 
 ---
 
@@ -752,3 +755,76 @@ dashboard_site/data/
   - 종목명 길이 `[:10]` → `[:25]` (2.5배 확장).
   - 종목명 색상 `text-slate-400` → `text-violet-600` (보라색).
   - `data_lacking=True` 행에 주황색 인라인 뱃지 `데이터부족 N일` 표시.
+
+---
+
+### 2026-05-17 변경 사항 (11차)
+
+#### 신규 기능 4종
+
+##### Feature 3 — 리스크 지표 (compare/run.py + compare.html)
+- `compare/run.py`에 `_win_rate_and_hold()`, `_mdd_from_trades()`, `_compute_risk_map()` 추가.
+- `_strategy_summary()` / `_per_ticker()`에 `avg_mdd`, `avg_win_rate`, `avg_hold_days` 컬럼 추가.
+- `compare.html`: MDD·승률·평균보유일 설명 섹션(`<details open>`) + 테이블에 컬럼 3개 추가(색상 인코딩 포함).
+  - MDD ≤10% 초록, ≤25% 주황, >25% 빨강 / 승률 ≥60% 초록, ≥40% 주황, 미만 빨강.
+- **MDD 계산**: trade ledger의 `holding_value`(현금추적타입은 +cash)로 equity curve 구성 → 고점 대비 최대 낙폭%.
+- **승률 계산**: 매도 직전 매수 row 페어링 → sell_price ≥ buy_price 여부.
+- **활용법**: `make v2-compare` 실행 후 `compare.html` → 전략별 요약 탭에서 확인.
+
+##### Feature 8 — 백테스트 거래 상세 페이지 (ticker_trades.html)
+- `render.py`에 `_generate_trade_jsons()` 추가 → `dashboard_site/data/trades/{ticker}.json` 생성.
+  - 우선순위: `full` period > `5y` > 첫 번째 period.
+  - JSON 구조: `{ticker, name, group_name, currency, period, types: {type_name: [trades]}}`
+- `ticker_trades.html` 신규: URL 해시(`ticker_trades.html#005930`) 기반 진입. JS `fetch(data/trades/{ticker}.json)` 로드.
+  - 전략별 요약 카드 (MDD, 승률, 보유일 JS 계산) + 접기/펼치기 거래 상세 테이블.
+  - 404 시 "백테스트가 실행되지 않은 종목" 안내 메시지.
+- `group_returns.html`: `tickers_with_trades` 집합으로 백테스트 데이터 있는 종목에만 "📋 거래 이력 상세 →" 링크 표시. 없으면 "거래 이력 없음 (백테스트 데이터 필요)" 텍스트.
+- `_nav.html`: "거래 이력" 메뉴 **제거** (group_returns 상세 행 링크로만 접근).
+- `render.py`: `_generate_trade_jsons()` 호출을 group_returns 렌더 **전**으로 이동하여 `tickers_with_trades` 집합을 먼저 구성.
+
+##### Feature 10 — 미국 시장 시그널 (fetch/market_signals_us.py)
+- `fetch/market_signals_us.py` 신규: yfinance `^VIX`(VIX), `^TNX`(10년), `^IRX`(3개월) 증분 수집.
+  - `fetch_vix()`, `fetch_us_yields()`, `check_us_signals()` — 역사적 상위 20% VIX 경보 + 10Y-3M spread 역전 감지.
+  - 저장: `data/market/us_vix.csv`, `data/market/us_yields.csv`.
+- `cli.py`: `candle market-signals-us` 명령 추가.
+- `render.py`: `_load_market_signals_us()` + `common_ctx["market_signals_us"]` 추가.
+- `market_signals.html`: KR/US Alpine.js 탭 구조로 전환. US 탭에 VIX 막대 SVG 차트 + Spread 꺾은선 SVG 차트 (3개월) + 1개월 테이블 + 용어 설명 추가.
+- `Makefile`: `v2-market-signals-us` 타겟 추가.
+- **활용**: `make v2-market-signals-us` → `make v2-dashboard` → `market_signals.html` US 탭.
+
+##### Feature 13 — KOSPI200 외국인/기관 종목별 매매 (fetch/foreign_trading.py)
+- `fetch/foreign_trading.py` 신규: pykrx `get_market_trading_value_by_date` per-ticker 증분 수집.
+  - `ThreadPoolExecutor` 병렬 처리 (기본 4 workers).
+  - 저장: `data/market/foreign/{ticker}.csv` — date, 기관합계, 외국인합계, 개인.
+  - `load_latest_snapshot()`: 여러 종목의 최근 N일 합산 스냅샷 로드 헬퍼.
+- `cli.py`: `candle foreign-trading` 명령 추가.
+- `render.py`: `_load_foreign_snapshot()` 추가. `group_ctx["foreign_snapshot"]` 전달.
+- `group_returns.html`: KOSPI200 상세 행에 "외국인 5일", "기관 5일" 순매수 합산 표시 (양수=초록, 음수=빨강).
+- `Makefile`: `v2-foreign-trading` 타겟 추가.
+- **활용**: `make v2-foreign-trading` → `make v2-dashboard` → `kospi200.html` 종목 클릭.
+
+#### 새 CLI 명령 / Makefile 타겟 요약
+
+| 명령 | 파일 저장 위치 | 설명 |
+|------|--------------|------|
+| `candle market-signals-us` | `data/market/us_vix.csv`, `us_yields.csv` | VIX + 미국채 수익률 증분 수집 |
+| `candle foreign-trading` | `data/market/foreign/{ticker}.csv` | KOSPI200 외국인/기관 매매 증분 수집 |
+| `make v2-market-signals-us` | 위 동일 + 진행 메일 | US 시장 시그널 수동 실행 |
+| `make v2-foreign-trading` | 위 동일 + 진행 메일 | KOSPI200 외국인 매매 수동 실행 |
+
+#### 파일 변경 목록
+
+| 파일 | 변경 유형 | 내용 |
+|------|----------|------|
+| `src/candle/compare/run.py` | 수정 | 리스크 지표 함수 추가, strategy_summary/per_ticker에 컬럼 추가 |
+| `src/candle/dashboard/render.py` | 수정 | generate_trade_jsons, load_market_signals_us, load_foreign_snapshot, tickers_with_trades |
+| `src/candle/dashboard/templates/compare.html` | 수정 | MDD·승률·보유일 설명 섹션 + 테이블 컬럼 추가 |
+| `src/candle/dashboard/templates/group_returns.html` | 수정 | tickers_with_trades 조건 링크, 외국인/기관 5일 표시 |
+| `src/candle/dashboard/templates/market_signals.html` | 수정 | KR/US 탭 분리, US 탭 VIX/Spread SVG 차트 추가 |
+| `src/candle/dashboard/templates/_nav.html` | 수정 | "거래 이력" 메뉴 제거 |
+| `src/candle/dashboard/templates/ticker_trades.html` | **신규** | 거래 이력 상세 페이지 |
+| `src/candle/fetch/market_signals_us.py` | **신규** | VIX + 미국채 수익률 수집 |
+| `src/candle/fetch/foreign_trading.py` | **신규** | KOSPI200 외국인/기관 매매 수집 |
+| `src/candle/cli.py` | 수정 | market-signals-us, foreign-trading 명령 추가 |
+| `Makefile` | 수정 | v2-market-signals-us, v2-foreign-trading 타겟 추가 |
+

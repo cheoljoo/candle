@@ -85,6 +85,12 @@ def render(cfg: config.Config, on_date: date,
     period_table, bt_periods = _build_period_table(cfg)
     tprint(f"[dashboard] 수익률 테이블 완료 — {len(period_table)}개 ticker × {len(bt_periods)}기간 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
+    # 외국인/기관 최근 5일 스냅샷 (KOSPI200)
+    tprint("[dashboard] 외국인/기관 스냅샷 로딩...", flush=True)
+    t0 = time.perf_counter()
+    foreign_snapshot = _load_foreign_snapshot(cfg)
+    tprint(f"[dashboard] 외국인/기관 완료 — {len(foreign_snapshot)}개 종목 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
     # ticker → period_table row (index.html inflection 테이블 기간수익률 조회용)
     period_table_by_ticker: dict[str, dict] = {r["ticker"]: r for r in period_table}
 
@@ -129,11 +135,25 @@ def render(cfg: config.Config, on_date: date,
         pt_row["data_lacking"] = rc < MA10M_MIN_ROWS
         pt_row["row_count"] = rc
 
-    # ── 시장 시그널 (프로그램 비차익 + 금융투자) ───────────────────────────
-    tprint("[dashboard] 시장 시그널 로딩...", flush=True)
+    # ── 종목별 거래 JSON 미리 생성 (group_returns 링크 표시 여부 판단용) ────
+    tprint("[dashboard] 종목별 거래 JSON 사전 생성 중...", flush=True)
+    t0 = time.perf_counter()
+    _generate_trade_jsons(cfg, out_dir)
+    _trades_dir = out_dir / "data" / "trades"
+    tickers_with_trades: set[str] = {p.stem for p in _trades_dir.glob("*.json")} if _trades_dir.exists() else set()
+    tprint(f"[dashboard] 거래 JSON 완료 — {len(tickers_with_trades)}개 종목 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
+    # ── 시장 시그널 KR (프로그램 비차익 + 금융투자) ───────────────────────
+    tprint("[dashboard] 시장 시그널 KR 로딩...", flush=True)
     t0 = time.perf_counter()
     market_signal_ctx = _load_market_signals(cfg, on_date)
-    tprint(f"[dashboard] 시장 시그널 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
+    tprint(f"[dashboard] 시장 시그널 KR 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
+    # ── 시장 시그널 US (VIX + 미국채 수익률) ─────────────────────────────
+    tprint("[dashboard] 시장 시그널 US 로딩...", flush=True)
+    t0 = time.perf_counter()
+    market_signal_us_ctx = _load_market_signals_us(cfg, on_date)
+    tprint(f"[dashboard] 시장 시그널 US 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     # ── 템플릿 렌더 ────────────────────────────────────────────────────────
     def _uk_fmt(value: object) -> str:
@@ -191,6 +211,8 @@ def render(cfg: config.Config, on_date: date,
         name_map=name_map,
         period_table_by_ticker=period_table_by_ticker,
         market_signals=market_signal_ctx,
+        market_signals_us=market_signal_us_ctx,
+        foreign_snapshot=foreign_snapshot,
     )
 
     # index.html
@@ -216,6 +238,8 @@ def render(cfg: config.Config, on_date: date,
         group_ctx["group_name"] = g
         group_ctx["period_table"] = period_table_by_group.get(g, [])
         group_ctx["new_listings"] = new_listings_by_group.get(g, [])
+        group_ctx["foreign_snapshot"] = foreign_snapshot
+        group_ctx["tickers_with_trades"] = tickers_with_trades
         (out_dir / fname).write_text(group_tpl.render(**group_ctx), encoding="utf-8")
         tprint(f"[dashboard] {fname} 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
@@ -274,6 +298,15 @@ def render(cfg: config.Config, on_date: date,
     ms_tpl = env.get_template("market_signals.html")
     (out_dir / "market_signals.html").write_text(ms_tpl.render(**common_ctx), encoding="utf-8")
     tprint(f"[dashboard] market_signals.html 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
+    # ticker_trades.html (정적 셸 — 실제 데이터는 JS fetch로 로딩)
+    tprint("[dashboard] ticker_trades.html 렌더...", flush=True)
+    t0 = time.perf_counter()
+    tt_tpl = env.get_template("ticker_trades.html")
+    (out_dir / "ticker_trades.html").write_text(tt_tpl.render(**common_ctx), encoding="utf-8")
+    tprint(f"[dashboard] ticker_trades.html 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
+    # (종목별 거래 JSON은 데이터 준비 단계에서 이미 생성됨)
 
     # 사이드 JSON
     tprint("[dashboard] JSON 산출물 저장...", flush=True)
@@ -733,6 +766,88 @@ def _load_optimize_results(cfg: config.Config) -> dict[str, list[dict]]:
     return result
 
 
+def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
+    """output/backtest/full/{type}/_all.csv 에서 종목별 거래 이력 JSON 생성.
+
+    dashboard_site/data/trades/{ticker}.json 으로 저장.
+    ticker_trades.html 에서 JS fetch로 사용.
+
+    Returns:
+        생성된 ticker 수
+    """
+    # 우선순위: full > 5y > 첫 번째 period
+    period_list = paths.list_backtest_periods(cfg.output_dir)
+    target_period = None
+    for preferred in ["full", "5y"]:
+        if preferred in period_list:
+            target_period = preferred
+            break
+    if target_period is None and period_list:
+        target_period = period_list[0]
+    if target_period is None:
+        return 0
+
+    bt_root = paths.backtest_root(cfg.output_dir, target_period)
+    if not bt_root or not bt_root.exists():
+        return 0
+
+    # instruments 메타 로드
+    inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+    inst_map: dict[str, dict] = {}
+    if not inst.empty:
+        for _, r in inst.iterrows():
+            inst_map[str(r["ticker"])] = {
+                "name": str(r.get("name", "")),
+                "group_name": str(r.get("group_name", "")),
+                "currency": str(r.get("currency", "")),
+            }
+
+    # (type, ticker) → trades 리스트 수집
+    ticker_trades: dict[str, dict[str, list]] = {}
+    for type_dir in sorted(bt_root.iterdir()):
+        if not type_dir.is_dir():
+            continue
+        all_csv = type_dir / "_all.csv"
+        if not all_csv.exists():
+            continue
+        adf = csv_io.read(all_csv)
+        if adf.empty or "ticker" not in adf.columns:
+            continue
+        type_name = type_dir.name
+        for ticker, grp in adf.groupby("ticker"):
+            tk = str(ticker)
+            cols = ["date", "side", "price", "qty", "amount",
+                    "holding_qty", "holding_value", "cash", "return_pct"]
+            cols = [c for c in cols if c in grp.columns]
+            records = grp[cols].fillna("").to_dict(orient="records")
+            # None/NaN 정리
+            clean = []
+            for rec in records:
+                clean.append({k: (None if v == "" else v) for k, v in rec.items()})
+            ticker_trades.setdefault(tk, {})[type_name] = clean
+
+    trades_dir = out_dir / "data" / "trades"
+    trades_dir.mkdir(parents=True, exist_ok=True)
+
+    count = 0
+    for tk, type_map in ticker_trades.items():
+        meta = inst_map.get(tk, {"name": tk, "group_name": "", "currency": ""})
+        payload = {
+            "ticker": tk,
+            "name": meta["name"],
+            "group_name": meta["group_name"],
+            "currency": meta["currency"],
+            "period": target_period,
+            "types": type_map,
+        }
+        (trades_dir / f"{tk}.json").write_text(
+            json.dumps(payload, ensure_ascii=False, default=_json_default),
+            encoding="utf-8",
+        )
+        count += 1
+    return count
+
+
 def _json_default(o):
     if isinstance(o, (pd.Timestamp,)):
         return o.isoformat()
@@ -883,5 +998,108 @@ def _load_market_signals(cfg: config.Config, on_date: date) -> dict:
         "prog_table": prog_table,
         "inv_chart_3m": inv_chart_3m,
         "inv_table": inv_table,
+    }
+
+
+def _load_foreign_snapshot(cfg: config.Config, days: int = 5) -> dict[str, dict]:
+    """KOSPI200 종목별 최근 N일 외국인/기관 순매수 합산 로드.
+
+    data/market/foreign/{ticker}.csv 에서 읽어 {ticker: {외국인합계, 기관합계, 개인}} 반환.
+    파일 없으면 빈 dict.
+    """
+    from ..fetch import foreign_trading as ft
+    inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+    if inst.empty:
+        return {}
+    tickers = inst[inst["group_name"] == "KOSPI200"]["ticker"].astype(str).tolist()
+    return ft.load_latest_snapshot(cfg.data_dir, tickers, days=days)
+
+
+def _load_market_signals_us(cfg: config.Config, on_date: date) -> dict:
+    """VIX + 미국채 수익률 곡선 시그널 로딩 (dashboard용).
+
+    data/market/us_vix.csv, data/market/us_yields.csv 에서 읽어
+    최근 3개월(차트) + 1개월(테이블) 데이터를 반환.
+    파일이 없으면 available=False 반환.
+    """
+    from ..fetch import market_signals_us as ms_us
+
+    market_dir = cfg.data_dir / "market"
+    vix_path    = market_dir / "us_vix.csv"
+    yields_path = market_dir / "us_yields.csv"
+
+    vix_df    = pd.read_csv(vix_path)    if vix_path.exists()    else pd.DataFrame()
+    yields_df = pd.read_csv(yields_path) if yields_path.exists() else pd.DataFrame()
+
+    if vix_df.empty and yields_df.empty:
+        return {"available": False}
+
+    signals = ms_us.check_us_signals(vix_df, yields_df, as_of=on_date)
+    today_str = on_date.strftime("%Y-%m-%d")
+    vix_thr = signals.get("vix_threshold", 30.0)
+
+    # VIX 차트 (3개월, 63거래일)
+    vix_chart: list[dict] = []
+    if not vix_df.empty and "close" in vix_df.columns:
+        hist = vix_df[vix_df["date"] <= today_str].tail(63)
+        for _, r in hist.iterrows():
+            v = float(pd.to_numeric(r["close"], errors="coerce") or 0)
+            vix_chart.append({
+                "date": r["date"],
+                "vix": round(v, 2),
+                "alert": v >= vix_thr,
+            })
+
+    # VIX 테이블 (1개월, 21거래일)
+    vix_table: list[dict] = []
+    if not vix_df.empty and "close" in vix_df.columns:
+        hist = vix_df[vix_df["date"] <= today_str].tail(21)
+        for _, r in hist.iloc[::-1].iterrows():
+            v = float(pd.to_numeric(r["close"], errors="coerce") or 0)
+            vix_table.append({
+                "date": r["date"],
+                "vix": round(v, 2),
+                "alert": v >= vix_thr,
+            })
+
+    # 수익률 곡선 차트 (3개월)
+    yield_chart: list[dict] = []
+    yield_table: list[dict] = []
+    if not yields_df.empty:
+        hist_y = yields_df[yields_df["date"] <= today_str].tail(63)
+        for _, r in hist_y.iterrows():
+            sp = float(pd.to_numeric(r.get("spread"), errors="coerce") or 0) if "spread" in r.index else None
+            yield_chart.append({
+                "date": r["date"],
+                "y10":    (round(float(pd.to_numeric(r.get("y10"),    errors="coerce")), 3) if "y10"    in r.index and pd.notna(r.get("y10"))    else None),
+                "y3m":    (round(float(pd.to_numeric(r.get("y3m"),    errors="coerce")), 3) if "y3m"    in r.index and pd.notna(r.get("y3m"))    else None),
+                "spread": (round(sp, 3) if sp is not None else None),
+                "inverted": sp is not None and sp < 0,
+            })
+        for _, r in yields_df[yields_df["date"] <= today_str].tail(21).iloc[::-1].iterrows():
+            sp = float(pd.to_numeric(r.get("spread"), errors="coerce") or 0) if "spread" in r.index else None
+            yield_table.append({
+                "date": r["date"],
+                "y10":    (round(float(pd.to_numeric(r.get("y10"), errors="coerce")), 3) if "y10" in r.index and pd.notna(r.get("y10")) else None),
+                "y3m":    (round(float(pd.to_numeric(r.get("y3m"), errors="coerce")), 3) if "y3m" in r.index and pd.notna(r.get("y3m")) else None),
+                "spread": (round(sp, 3) if sp is not None else None),
+                "inverted": sp is not None and sp < 0,
+            })
+
+    return {
+        "available": True,
+        "vix_signal": signals["vix_signal"],
+        "inversion_signal": signals["inversion_signal"],
+        "any_signal": signals.get("any_signal", False),
+        "signals": signals["signals"],
+        "vix_value": round(signals["vix_value"], 2),
+        "vix_threshold": round(vix_thr, 2),
+        "vix_pct_rank": signals.get("vix_pct_rank", 50.0),
+        "spread": signals["spread"],
+        "inversion_days": signals["inversion_days"],
+        "vix_chart": vix_chart,
+        "vix_table": vix_table,
+        "yield_chart": yield_chart,
+        "yield_table": yield_table,
     }
 

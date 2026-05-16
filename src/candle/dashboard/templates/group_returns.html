@@ -91,6 +91,34 @@
           <tr x-show="open_ticker === '{{ row.ticker }}'"
               x-cloak class="bg-slate-50">
             <td colspan="{{ periods|length + (3 if show_rank else 2) }}" class="px-6 py-3">
+              <div class="mb-2 flex items-center gap-3 flex-wrap">
+                {# 거래 이력 링크 — backtest 데이터가 있는 종목만 표시 #}
+                {% if row.ticker in tickers_with_trades %}
+                <a href="ticker_trades.html#{{ row.ticker }}"
+                   class="text-xs px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 inline-flex items-center gap-1"
+                   target="_blank">📋 거래 이력 상세 →</a>
+                {% else %}
+                <span class="text-xs text-slate-400 italic">거래 이력 없음 (백테스트 데이터 필요)</span>
+                {% endif %}
+                {# 외국인/기관 최근 5일 순매수 (KOSPI200만) #}
+                {% if group_name == 'KOSPI200' %}
+                {% set fs = foreign_snapshot.get(row.ticker) %}
+                {% if fs %}
+                <span class="text-xs text-slate-500">외국인 5일
+                  <span class="font-semibold tabular-nums
+                    {% if fs.get('외국인합계', 0) >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">
+                    {{ "{:+,}".format(fs.get('외국인합계', 0)) }}
+                  </span>
+                </span>
+                <span class="text-xs text-slate-500">기관 5일
+                  <span class="font-semibold tabular-nums
+                    {% if fs.get('기관합계', 0) >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">
+                    {{ "{:+,}".format(fs.get('기관합계', 0)) }}
+                  </span>
+                </span>
+                {% endif %}
+                {% endif %}
+              </div>
               <table class="text-xs w-full border-collapse">
                 <thead>
                   <tr class="text-slate-500">
