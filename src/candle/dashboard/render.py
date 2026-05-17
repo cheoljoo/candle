@@ -577,6 +577,7 @@ def _load_inflections(cfg: config.Config, on_date: date,
         out.append({
             "ticker": tk,
             "group_name": str(row["group_name"]),
+            "date": target,
             "inflection": str(infl),
             "close": _maybe_float(rec.get("close")),
             "ma10m": _maybe_float(rec.get("ma10m")),
@@ -915,16 +916,17 @@ def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
 
     # (type, ticker) → trades 리스트 수집
     ticker_trades: dict[str, dict[str, list]] = {}
-    for type_dir in sorted(bt_root.iterdir()):
-        if not type_dir.is_dir():
-            continue
+    type_dirs = sorted(d for d in bt_root.iterdir() if d.is_dir() and (d / "_all.csv").exists())
+    tprint(f"[dashboard] 거래 JSON — {len(type_dirs)}개 type CSV 읽는 중...", flush=True)
+    for i, type_dir in enumerate(type_dirs, start=1):
         all_csv = type_dir / "_all.csv"
-        if not all_csv.exists():
-            continue
+        t_csv = time.perf_counter()
         adf = csv_io.read(all_csv)
         if adf.empty or "ticker" not in adf.columns:
+            tprint(f"[dashboard] 거래 JSON [{i}/{len(type_dirs)}] {type_dir.name} — 데이터 없음 ({time.perf_counter()-t_csv:.1f}s)", flush=True)
             continue
         type_name = type_dir.name
+        ticker_count = 0
         for ticker, grp in adf.groupby("ticker"):
             tk = str(ticker)
             # KR 종목 ticker: _all.csv에 선행 0 없이 저장되므로 6자리로 zero-pad
@@ -939,11 +941,16 @@ def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
             for rec in records:
                 clean.append({k: (None if v == "" else v) for k, v in rec.items()})
             ticker_trades.setdefault(tk, {})[type_name] = clean
+            ticker_count += 1
+        tprint(f"[dashboard] 거래 JSON [{i}/{len(type_dirs)}] {type_dir.name} — {ticker_count}개 ticker ({time.perf_counter()-t_csv:.1f}s)", flush=True)
 
     trades_dir = out_dir / "data" / "trades"
     trades_dir.mkdir(parents=True, exist_ok=True)
 
+    total = len(ticker_trades)
+    tprint(f"[dashboard] 거래 JSON — {total}개 ticker JSON 저장 중...", flush=True)
     count = 0
+    _step = max(1, min(100, total // 5))
     for tk, type_map in ticker_trades.items():
         meta = inst_map.get(tk, {"name": tk, "group_name": "", "currency": ""})
         payload = {
@@ -959,6 +966,8 @@ def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
             encoding="utf-8",
         )
         count += 1
+        if count % _step == 0 or count == total:
+            tprint(f"[dashboard] 거래 JSON 저장 {count}/{total} ({count/total*100:.0f}%)", flush=True)
     return count
 
 

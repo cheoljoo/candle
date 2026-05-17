@@ -20,6 +20,24 @@ from .. import config
 from ..storage import csv_io, paths
 from . import manual, ai_advisor
 
+
+def _load_trading_days(data_dir: Path) -> dict[str, set[str]]:
+    """market_calendar.csv → {'KR': {날짜str, ...}, 'US': {날짜str, ...}}
+    파일이 없으면 빈 dict 반환 (검증 skip)."""
+    cal_path = paths.market_calendar_csv(data_dir)
+    if not cal_path.exists():
+        return {}
+    try:
+        df = pd.read_csv(cal_path)
+        result: dict[str, set[str]] = {}
+        if "is_kr_trading" in df.columns:
+            result["KR"] = set(df.loc[df["is_kr_trading"] == True, "date"].astype(str))
+        if "is_us_trading" in df.columns:
+            result["US"] = set(df.loc[df["is_us_trading"] == True, "date"].astype(str))
+        return result
+    except Exception:
+        return {}
+
 log = logging.getLogger(__name__)
 
 
@@ -123,9 +141,36 @@ def run(cfg: config.Config, on_date: date,
             "raw_json_path": "",
         })
 
+    # market_calendar 기반 비거래일 date 검증
+    # cur_row["date"] 는 실데이터 날짜이므로 정상이면 항상 통과.
+    # fetch 없이 실행하거나 데이터 이상 시 방어 필터로 작동.
+    trading_days = _load_trading_days(cfg.data_dir)
+    if trading_days and rule_decisions:
+        inst_map: dict[str, str] = {}
+        inst_df = csv_io.read(paths.instruments_csv(cfg.data_dir))
+        if not inst_df.empty and "ticker" in inst_df.columns and "market" in inst_df.columns:
+            inst_map = {str(r["ticker"]): str(r["market"]).upper()
+                        for _, r in inst_df.iterrows()}
+        filtered: list[dict] = []
+        for dec in rule_decisions:
+            mkt = inst_map.get(str(dec["ticker"]), "")
+            td = trading_days.get(mkt, set())
+            if td and str(dec["date"]) not in td:
+                log.warning(
+                    "[simulate] 비거래일 date=%s ticker=%s source=%s — skipped",
+                    dec["date"], dec["ticker"], dec["source"],
+                )
+                continue
+            filtered.append(dec)
+        if len(filtered) < len(rule_decisions):
+            skipped = len(rule_decisions) - len(filtered)
+            print(f"[simulate] 경고: 비거래일 date를 가진 rule decision {skipped}개 제외됨", flush=True)
+        rule_decisions = filtered
+
     all_dec = rule_decisions + ai_decisions + manual_decisions
     if all_dec:
         new_df = pd.DataFrame(all_dec, columns=DECISIONS_COLUMNS)
+
         csv_io.upsert_by_keys(
             decisions_path(cfg), new_df,
             key_cols=["date", "ticker", "source"],

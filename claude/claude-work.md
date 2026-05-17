@@ -946,3 +946,32 @@
   - 기준일 헤더: `event_date` → `date` (마지막 거래일).
   - 날짜 칼럼: `date (요일)` 주 표시, `event_date`(연속 시작일)를 괄호로 부 표시 (다를 때만).
   - `dow_fmt` 필터 적용 (YYYY-MM-DD → YYYY-MM-DD (요일)).
+
+### ticker String 강제화 — csv_io.read()
+
+- **배경** : KR ticker(`000120` 등)는 숫자만으로 구성되어 pandas가 int로 읽을 수 있음. 이로 인해 `str(ticker)` 비교 시 불일치 발생.
+- **수정** (`src/candle/storage/csv_io.py`)
+  - `read()` 함수: `pd.read_csv()` 후 `"ticker"` 컬럼이 있으면 항상 `.astype(str)` 강제.
+  - 모든 CSV 읽기 경로(decisions, instruments, daily 등)에 자동 적용.
+
+### decisions.csv stale rows 정리 + engine.py 검증 가드
+
+- **배경** : 수정 전 `engine.py`가 `on_date.isoformat()` 사용 → 일요일 실행 시 date=2026-05-17 등 비거래일 기록. 수정 후에도 기존 stale rows가 남아 대시보드에 주말 날짜 표시.
+- **처리 흐름**:
+  1. 첫 번째 일회성 cleanup 스크립트: 주말(토/일) 날짜의 rule decisions 중 동일 (ticker, source)에 평일 날짜가 있는 행 제거 (7262 → 4114 rows).
+  2. engine.py에 aggressive stale cleanup 추가 → 역사적 decisions 행까지 삭제하는 버그 발견(4114 → 1251 rows).
+  3. engine.py에서 stale cleanup 코드 **제거** (cur_row["date"] 사용으로 근본 해결).
+  4. 두 번째 cleanup: 주말 날짜 rows 완전 제거 (`dayofweek >= 5`) → 1251 → 1181 rows.
+  5. 000120 type2_1 event_date NaN → 2026-05-12 수동 수정 (type2_2와 동일 streak 시작일).
+- **추가** (`src/candle/simulate/engine.py`)
+  - `_load_trading_days(data_dir)`: market_calendar.csv → `{'KR': {날짜 set}, 'US': {날짜 set}}` 로드. 파일 없으면 빈 dict(검증 skip).
+  - rule decisions 생성 후 market_calendar 기반 비거래일 date 검증: 비거래일이면 `log.warning` + 출력 후 skip.
+  - **설계 원칙**: `cur_row["date"]` = 실데이터 날짜이므로 정상 운영 시 항상 통과. fetch 없이 실행하거나 데이터 이상 시 방어 필터로 작동.
+- **결과**: `decisions.csv` 1181 rows, 주말 날짜 없음. KR/US 공휴일(평일)도 fetch 데이터에 없으면 자동 제외됨.
+
+### 변곡점 발생 테이블에 날짜 컬럼 추가
+
+- **수정** (`src/candle/dashboard/render.py`, `src/candle/dashboard/templates/index.html`)
+  - `_load_inflections()` 반환 dict에 `"date": target` 추가 (KR/US 시장별 유효 날짜).
+  - `index.html` 변곡점 테이블: `날짜` 헤더 컬럼 추가, 각 행에 `{{ r.date | dow_fmt }}` 표시.
+  - KR 종목은 KR 거래일, US 종목은 US 거래일 기준으로 각자 정확한 날짜 표시.

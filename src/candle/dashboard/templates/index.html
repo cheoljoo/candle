@@ -215,6 +215,7 @@
           <tr>
             <th class="text-left px-3 py-2">Ticker / 종목명</th>
             <th class="text-left px-3 py-2">Group</th>
+            <th class="text-left px-3 py-2">날짜</th>
             <th class="text-left px-3 py-2">Inflection</th>
             <th class="text-right px-3 py-2">Close</th>
             <th class="text-right px-3 py-2">MA10M</th>
@@ -236,6 +237,7 @@
               {% endif %}
             </td>
             <td class="px-3 py-2 text-xs text-slate-500">{{ r.group_name }}</td>
+            <td class="px-3 py-2 text-xs text-slate-600 whitespace-nowrap">{{ r.date | dow_fmt }}</td>
             <td class="px-3 py-2 font-medium {% if r.inflection == '-→+' %}text-emerald-600{% else %}text-rose-600{% endif %}">{{ r.inflection }}</td>
             <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.2f}".format(r.close) if r.close is not none else "—" }}</td>
             <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.2f}".format(r.ma10m) if r.ma10m is not none else "—" }}</td>

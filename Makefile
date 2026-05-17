@@ -4,7 +4,7 @@ SHELL := /bin/bash
 # debug 켜기:    make <target> DEBUG=--debug
 # 메일 발송 켜기: make <target> SENDMAIL=YES
 DEBUG    ?=
-SENDMAIL ?= YES
+SENDMAIL ?= 
 
 
 .PHONY: fetch analyze backtest-type1 backtest-type1-2020-2025 backtest-type1-2025-now \
@@ -232,6 +232,11 @@ v2-sendmail:
 # ── optimize (v2-all 에 미포함 — 수동 실행) ───────────────────────────────────
 # type2_1b / type2_2b 의 plus_days(4~40 step2) × minus_days(4~10 step2) = 76 조합
 # --all-groups: 전체 + KOSPI200/SP500/ETF_KR/ETF_US 5개 결과 파일 생성
+#     전체 ticker를 1회만 로딩 (병렬)
+#     ("all", 전체), ("KOSPI200", 필터), ("SP500", 필터), ("ETF_KR", 필터), ("ETF_US", 필터) 순서로 grid search 5번 실행
+#     각 그룹별 streak_grid_{group}.csv 저장
+#     추가로 각 그룹의 종목별(per-ticker) grid search도 실행 → output/optimize/per_ticker/{group}/{ticker}.csv
+#     즉, --all-groups 없이 실행하면 전체 통합 결과(streak_grid_all.csv) 1개만 생성됩니다.
 # 결과: output/optimize/streak_grid_{all|KOSPI200|SP500|ETF_KR|ETF_US}.csv
 v2-optimize:
 	mkdir -p output/optimize
