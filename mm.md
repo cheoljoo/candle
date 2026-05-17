@@ -1,15 +1,22 @@
-feat: 거래이력 Chart.js 차트 + 전략설명 + Buy-Sell 수익률 + prev_action 신호변화
+feat: backtest 기간 config화(periods.yml) + Chart.js 차트 + 전략설명 + Buy-Sell 수익률
 
-## dashboard/render.py — 거래 이력 JSON에 prices 추가
-- inst_map에 market 필드 추가
-- `_load_ticker_prices(data_dir, market, ticker, months=12)` 헬퍼 신규
-  - data/daily/{KR|US}/{ticker}.csv 최근 12개월 종가·ma10m 반환
-- `_generate_trade_jsons()` payload에 `prices` 키 추가
+## config/periods.yml 신규 — backtest 기간 정의
+- 기간별 label / from / to / rolling / markets 필드
+- rolling: "5y" 지원 (실행 시점 N년 전 날짜 자동 계산)
+- workers: 0 = 기간 수 만큼 병렬(기본), 1 = 순차
 
-## dashboard/templates/ticker_trades.html — Chart.js 거래 이력 차트
-- Chart.js 4.4.4 CDN 추가
-- `buildTradeChart()` 함수 신규: 종가(slate), 10월MA(orange dash), 매수(green▲), 매도(red▽), 보유수량(green step-fill, 우측 y축)
-- tooltip: 매수→현금·보유수량, 매도→현금·Buy-Sell 수익률
-- ON 전략만 차트 표시 (ENABLED_TYPES 기반 isOn 조건)
-- 전략 설명 표시: TYPE_DESCRIPTIONS JS Map (short — detail) + ON/OFF 뱃지
-- 리스크 지표 설명 섹션 기본 접힘 상태 (hidden + 펼치기 버튼)
+## src/candle/config.py — periods 지원 추가
+- `Config.periods` 필드, `_load_periods()`, `backtest_periods` 프로퍼티
+- `backtest_periods_for_market(market)` 메서드: markets 필드 기준 필터링
+
+## src/candle/cli.py — candle backtest-all 커맨드 신규
+- `_resolve_rolling("5y")`: N년 전 date 반환
+- `_period_task(task)`: ProcessPoolExecutor worker 함수
+- `candle backtest-all --market all|kr|us --workers N`
+  - workers: CLI > periods.yml > len(periods) (병렬 최대)
+  - workers > 1 시 ProcessPoolExecutor 병렬 실행 (make -j 동등)
+
+## Makefile — v2-backtest{,-kr,-us} 커맨드 수정
+- `$(MAKE) -j ...` → `uv run candle backtest-all --market {all|kr|us}`
+- 기존 v2-backtest-compare-{label} 수동 단일 실행 타겟 유지
+

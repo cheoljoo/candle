@@ -62,11 +62,12 @@ help:
 	@echo "  make v2-simulate-noai               - AI 없이 rule+manual만"
 	@echo "  make v2-dashboard                   - HTML 대시보드 재생성"
 	@echo ""
-	@echo "Backtest 기간별 타겟:"
+	@echo "Backtest 기간별 타겟 (수동 단일 실행용):"
 	@echo "  make v2-backtest-compare-full       - 2000-01-01~ backtest+compare"
 	@echo "  make v2-backtest-compare-5y         - 최근 5년 backtest+compare"
 	@echo "  make v2-backtest-compare-2010-2020  - 2010~2020 고정 기간"
 	@echo "  make v2-backtest-compare-2000-2015  - 2000~2015 고정 기간"
+	@echo "  (기간 추가: config/periods.yml 에만 항목 추가 → Makefile 수정 불필요)"
 	@echo ""
 	@echo "메일 발송 (config/recipients.yml 기반 개별 To:):"
 	@echo "  make v2-mail                        - 전체 수신자 발송 (decisions.json 자동 본문)"
@@ -201,9 +202,10 @@ v2-backtest-compare-2000-2015:
 	uv run candle backtest --from 2000-01-01 --to 2016-01-01 --label 2000-2015 --market all $(DEBUG)
 	uv run candle compare  --from 2000-01-01 --to 2016-01-01 --label 2000-2015 $(DEBUG)
 
-# ── 병렬 실행 (v2-all 에서 사용) ───────────────────────────────────────────────
+# ── 전체 기간 실행 (config/periods.yml 기반) ─────────────────────────────────────
+# 기간 추가/변경: config/periods.yml 만 수정하면 자동 반영 (Makefile 수정 불필요)
 v2-backtest:
-	set -o pipefail; $(MAKE) -j v2-backtest-compare-full v2-backtest-compare-5y v2-backtest-compare-2010-2020 v2-backtest-compare-2000-2015 DEBUG="$(DEBUG)" | tee v2-backtest.log
+	set -o pipefail; uv run candle backtest-all --market all $(DEBUG) | tee v2-backtest.log
 	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-backtest.log" --body-file="./v2-backtest.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-simulate:
@@ -291,7 +293,7 @@ v2-backtest-compare-5y-kr:
 	uv run candle compare  --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y $(DEBUG)
 
 v2-backtest-kr:
-	set -o pipefail; $(MAKE) -j v2-backtest-compare-full-kr v2-backtest-compare-5y-kr DEBUG="$(DEBUG)" | tee v2-backtest-kr.log
+	set -o pipefail; uv run candle backtest-all --market kr $(DEBUG) | tee v2-backtest-kr.log
 	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-backtest-kr.log" --body-file="./v2-backtest-kr.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-sendmail-kr:
@@ -317,7 +319,7 @@ v2-backtest-compare-5y-us:
 	uv run candle compare  --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y $(DEBUG)
 
 v2-backtest-us:
-	set -o pipefail; $(MAKE) -j v2-backtest-compare-full-us v2-backtest-compare-5y-us DEBUG="$(DEBUG)" | tee v2-backtest-us.log
+	set -o pipefail; uv run candle backtest-all --market us $(DEBUG) | tee v2-backtest-us.log
 	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-backtest-us.log" --body-file="./v2-backtest-us.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-sendmail-us:

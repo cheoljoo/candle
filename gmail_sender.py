@@ -340,7 +340,7 @@ def main():
     args = parser.parse_args()
 
     # --sendmail 이 빈값이거나 미지정이면 발송하지 않고 즉시 종료
-    if not args.sendmail or not args.sendmail.strip():
+    if (not args.sendmail) or (args.sendmail.strip() != 'YES'):
         print("[mail] SENDMAIL 값 없음 — 메일 발송 건너뜀")
         return
 

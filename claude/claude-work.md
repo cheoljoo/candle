@@ -1064,3 +1064,33 @@
 - **차트 구간 1년** : `_load_ticker_prices` 기본값 `months=6` → `months=12` 변경.
 - **리스크 지표 설명 섹션 기본 접힘** : `risk-body` div에 `hidden` 클래스 추가, 버튼 텍스트 `접기` → `펼치기`.
 - **검증** : `make v2-dashboard` 정상 완료. `dashboard_site/data/trades/000100.json`의 `prices.dates` 248개(1년치) 확인.
+
+### backtest 기간 설정 config화 — config/periods.yml + candle backtest-all
+
+- **배경** : Makefile에 `2000-2015`, `2010-2020`, `5y`, `full` 4개 기간이 하드코딩되어 있어 기간 추가 시 Makefile 직접 수정이 필요했던 문제.
+- **신규 파일** (`config/periods.yml`)
+  - `workers`: 0 = 기간 수 만큼 병렬(기본), 1 = 순차 실행.
+  - 기간별 필드: `label`, `from`, `to`, `rolling`, `markets`.
+  - `rolling: "5y"` 형식: 실행 시점 기준 N년 전 날짜 자동 계산.
+  - `markets` 필드: `[all, kr, us]` 중 해당 시장에만 실행 (v2-backtest-kr 실행 시 `kr` 기준 필터).
+  - **기간 추가 방법**: 이 파일에 항목 하나 추가하면 Makefile 수정 불필요.
+- **수정** (`src/candle/config.py`)
+  - `Config.periods: dict[str, Any]` 필드 추가.
+  - `_load_periods()`: `config/periods.yml` 로드 (파일 없으면 `{}`).
+  - `backtest_periods` 프로퍼티: 전체 기간 목록.
+  - `backtest_periods_for_market(market)`: `markets` 필드 기준 필터링 반환.
+- **수정** (`src/candle/cli.py`)
+  - `_resolve_rolling("5y")` 헬퍼: 실행 시점 N년 전 `date` 반환.
+  - `_period_task(task: dict) → str` 모듈레벨 함수: `ProcessPoolExecutor` worker 용.
+    - `task` 키: `label, start_str, end_str, type_list, market, debug`.
+    - 프로세스별 `config.load()` 재호출 → backtest + compare 순차 실행.
+  - `candle backtest-all` 커맨드 신규:
+    - `--market [all|kr|us]`, `--workers N` (0 = yml값, 1 = 순차), `--debug`.
+    - workers 우선순위: CLI `--workers` > `periods.yml workers` > `len(periods)` (병렬 최대).
+    - `workers > 1` 시 `ProcessPoolExecutor` 병렬 실행 → 기존 `make -j` 동작과 동일.
+- **수정** (`Makefile`)
+  - `v2-backtest` → `uv run candle backtest-all --market all`
+  - `v2-backtest-kr` → `uv run candle backtest-all --market kr`
+  - `v2-backtest-us` → `uv run candle backtest-all --market us`
+  - 기존 `v2-backtest-compare-{label}` 개별 타겟은 수동 단일 실행용으로 유지.
+- **검증** : `uv run candle backtest-all --help` 정상. workers 동작 확인(`market=all` 시 `effective workers=4`).

@@ -159,6 +159,126 @@ def compare(
     typer.echo(f"compare result: {res}")
 
 
+def _resolve_rolling(rolling: str) -> date:
+    """'Ny' 형식의 롤링 날짜를 실제 date로 변환.
+
+    예) '5y' → 오늘 기준 5년 전 날짜
+    """
+    if not rolling.endswith("y") or not rolling[:-1].isdigit():
+        raise ValueError(f"rolling 형식 오류: {rolling!r} (지원 형식: '5y', '3y', …)")
+    years = int(rolling[:-1])
+    today = date.today()
+    try:
+        return today.replace(year=today.year - years)
+    except ValueError:  # 2월 29일 케이스
+        return today.replace(year=today.year - years, day=28)
+
+
+def _period_task(task: dict) -> str:
+    """단일 기간 backtest + compare 실행 (ProcessPoolExecutor worker 함수).
+
+    args (dict 키):
+      label, start_str, end_str, type_list, market, debug
+    """
+    from . import config as cfg_mod
+    from .backtest import run as bt_run
+    from .compare import run as cmp_run
+    import logging, sys
+
+    cfg = cfg_mod.load()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        stream=sys.stdout,
+    )
+    label     = task["label"]
+    start_str = task.get("start_str")
+    end_str   = task.get("end_str")
+    type_list = task["type_list"]
+    market    = task["market"]
+    debug     = task["debug"]
+
+    start = datetime.strptime(start_str, "%Y-%m-%d").date() if start_str else None
+    end   = datetime.strptime(end_str,   "%Y-%m-%d").date() if end_str   else None
+
+    print(f"[backtest-all] [{label}] backtest 시작 (from={start_str}, to={end_str or 'today'})", flush=True)
+    bt_run.run(cfg, type_list, market, start, end, debug=debug, period=label)
+    print(f"[backtest-all] [{label}] compare 시작", flush=True)
+    cmp_run.run(cfg, type_list, debug=debug, period=label)
+    print(f"[backtest-all] [{label}] 완료", flush=True)
+    return label
+
+
+@app.command("backtest-all")
+def backtest_all(
+    market:  str = typer.Option("all", help="kr | us | all"),
+    workers: int = typer.Option(0,     "--workers",
+                                help="기간 병렬 실행 수. 0 = periods.yml workers 값 사용 "
+                                     "(기본 기간 수 만큼 병렬). 1 = 순차 실행."),
+    debug:   bool = typer.Option(False, "--debug", help="type×ticker별 backtest 진행 상황 출력"),
+):
+    """config/periods.yml 에 정의된 모든 기간에 대해 backtest + compare 병렬 실행.
+
+    기간 추가는 config/periods.yml 에만 하면 됩니다. Makefile 수정 불필요.
+
+    workers 우선순위: --workers CLI 옵션 > periods.yml workers > 기간 수(병렬 최대)
+    """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    cfg = config.load()
+    _setup_logging(cfg, debug=debug)
+
+    type_list = cfg.enabled_types
+    periods = cfg.backtest_periods_for_market(market)
+    if not periods:
+        typer.echo(f"[backtest-all] market={market!r}에 해당하는 기간이 periods.yml에 없습니다.", err=True)
+        raise typer.Exit(1)
+
+    # workers 결정: CLI → yml → 기간 수 만큼 병렬
+    if workers == 0:
+        yml_workers = cfg.periods.get("workers", 0) if cfg.periods else 0
+        workers = len(periods) if yml_workers == 0 else int(yml_workers)
+
+    labels = [p["label"] for p in periods]
+    typer.echo(f"[backtest-all] market={market}, {len(periods)}개 기간: {labels}, workers={workers}")
+
+    # 각 기간의 실행 task 빌드
+    tasks = []
+    for period_def in periods:
+        label = period_def["label"]
+        if "rolling" in period_def:
+            start_str = _resolve_rolling(period_def["rolling"]).isoformat()
+        else:
+            start_str = period_def.get("from")
+        end_str = period_def.get("to")
+        tasks.append({
+            "label":     label,
+            "start_str": start_str,
+            "end_str":   end_str,
+            "type_list": type_list,
+            "market":    market,
+            "debug":     debug,
+        })
+
+    if workers <= 1:
+        # 순차 실행
+        for task in tasks:
+            _period_task(task)
+    else:
+        # 병렬 실행 (기존 make -j 동작과 동일)
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_period_task, task): task["label"] for task in tasks}
+            for fut in as_completed(futures):
+                label = futures[fut]
+                try:
+                    fut.result()
+                except Exception as exc:
+                    typer.echo(f"[backtest-all] [{label}] 실패: {exc}", err=True)
+                    raise typer.Exit(1)
+
+    typer.echo(f"\n[backtest-all] 전체 완료 — {len(periods)}개 기간: {labels}")
+
+
 @app.command()
 def simulate(
     today: Optional[str] = typer.Option(None, help="기준일 YYYY-MM-DD"),
