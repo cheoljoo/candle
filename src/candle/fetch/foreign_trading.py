@@ -17,6 +17,7 @@ KOSPI200 종목별 외국인/기관 일별 순매수 데이터 수집 (pykrx).
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from pathlib import Path
@@ -99,7 +100,7 @@ def run(
     data_dir: Path,
     tickers: list[str],
     end: date | None = None,
-    workers: int = 4,
+    workers: int = max(1, (os.cpu_count() or 4) // 2),
     verbose: bool = True,
 ) -> dict:
     """KOSPI200 종목별 외국인/기관 매매 데이터 증분 수집.

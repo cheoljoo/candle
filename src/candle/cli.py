@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
+
+_DEFAULT_WORKERS: int = max(1, (os.cpu_count() or 4) // 2)
 
 import typer
 
@@ -67,7 +70,7 @@ def fetch(
     market: str = typer.Option("all", help="kr | us | all"),
     today: Optional[str] = typer.Option(None, help="기준일 YYYY-MM-DD"),
     debug: bool = typer.Option(False, "--debug", help="회사별 fetch start/end 상세 출력"),
-    workers: int = typer.Option(4, "--workers", help="병렬 fetch worker 수 (기본 4)"),
+    workers: int = typer.Option(_DEFAULT_WORKERS, "--workers", help="병렬 fetch worker 수 (기본 CPU×1/2)"),
     timeout: int = typer.Option(10, "--timeout", help="종목당 timeout 초 (기본 10) — 초과 시 fail 처리"),
     from_str: Optional[str] = typer.Option(None, "--from", help="백필 시작일 YYYY-MM-DD — 기존 파일이 있어도 이 날짜부터 재수집"),
 ):
@@ -99,8 +102,8 @@ def analyze(
 
 @app.command()
 def backtest(
-    types: str = typer.Option("type1_1,type1_2,type2_1,type2_2,type2_1b,type2_2b,type3",
-                              help="콤마 분리. 예: type1_1,type3"),
+    types: Optional[str] = typer.Option(None,
+                              help="콤마 분리. 미지정 시 config/strategies.yml의 enabled_types 사용"),
     market: str = typer.Option("all", help="kr | us | all"),
     start: Optional[str] = typer.Option(None, "--from", help="시작일 YYYY-MM-DD"),
     end: Optional[str] = typer.Option(None, "--to", help="종료일 YYYY-MM-DD"),
@@ -121,7 +124,9 @@ def backtest(
     cfg = config.load()
     _setup_logging(cfg, debug=debug)
     from .backtest import run as bt_run
-    type_list = [t.strip() for t in types.split(",") if t.strip()]
+    type_list = ([t.strip() for t in types.split(",") if t.strip()]
+                 if types else cfg.enabled_types)
+    typer.echo(f"backtest types: {type_list}")
     period = label if label else _make_period(start, end)
     res = bt_run.run(cfg, type_list, market, _maybe_date(start), _maybe_date(end),
                      debug=debug, period=period)
@@ -130,8 +135,8 @@ def backtest(
 
 @app.command()
 def compare(
-    types: str = typer.Option("type1_1,type1_2,type2_1,type2_2,type2_1b,type2_2b,type3",
-                              help="비교할 backtest type 리스트 (콤마 분리)"),
+    types: Optional[str] = typer.Option(None,
+                              help="비교할 backtest type 리스트 (콤마 분리). 미지정 시 config/strategies.yml의 enabled_types 사용"),
     start: Optional[str] = typer.Option(None, "--from", help="backtest --from 과 동일 값"),
     end: Optional[str] = typer.Option(None, "--to", help="backtest --to 와 동일 값"),
     label: Optional[str] = typer.Option(None, "--label",
@@ -146,7 +151,9 @@ def compare(
     cfg = config.load()
     _setup_logging(cfg, debug=debug)
     from .compare import run as cmp_run
-    type_list = [t.strip() for t in types.split(",") if t.strip()]
+    type_list = ([t.strip() for t in types.split(",") if t.strip()]
+                 if types else cfg.enabled_types)
+    typer.echo(f"compare types: {type_list}")
     period = label if label else _make_period(start, end)
     res = cmp_run.run(cfg, type_list, debug=debug, period=period)
     typer.echo(f"compare result: {res}")
@@ -162,7 +169,8 @@ def simulate(
     cfg = config.load()
     _setup_logging(cfg, debug=debug)
     from .simulate import run as sim_run
-    res = sim_run.run(cfg, _today(today), use_ai=use_ai, debug=debug)
+    res = sim_run.run(cfg, _today(today), use_ai=use_ai, debug=debug,
+                      rule_types=cfg.enabled_types)
     typer.echo(f"simulate result: {res}")
 
 
@@ -196,7 +204,7 @@ def optimize_streak(
     minus_min:  int = typer.Option(4,  "--minus-min", help="minus_days 최솟값 (기본 4)"),
     minus_max:  int = typer.Option(10, "--minus-max", help="minus_days 최댓값 (기본 10)"),
     minus_step: int = typer.Option(2,  "--minus-step",help="minus_days 간격 (기본 2)"),
-    workers:    int  = typer.Option(4,  "--workers",   help="ticker 로딩 병렬 worker 수 (기본 4)"),
+    workers:    int  = typer.Option(_DEFAULT_WORKERS, "--workers",   help="ticker 로딩 병렬 worker 수 (기본 CPU×1/2)"),
     top_n:      int  = typer.Option(30, "--top",       help="상위 N개 출력 (기본 30)"),
     output:     Optional[str] = typer.Option(None, "--output", help="단일 결과 저장 CSV 경로 (--all-groups 미사용 시)"),
     debug:      bool = typer.Option(False, "--debug",
@@ -281,7 +289,7 @@ def market_signals(
 @app.command("foreign-trading")
 def foreign_trading_cmd(
     market: str  = typer.Option("kr", help="kr (KOSPI200만 지원)"),
-    workers: int = typer.Option(4,   "--workers", help="병렬 worker 수 (기본 4)"),
+    workers: int = typer.Option(_DEFAULT_WORKERS, "--workers", help="병렬 worker 수 (기본 CPU×1/2)"),
     quiet: bool  = typer.Option(False, "--quiet",  help="진행 출력 억제"),
 ):
     """KOSPI200 종목별 외국인/기관 일별 순매수 증분 수집.

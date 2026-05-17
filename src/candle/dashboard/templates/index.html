@@ -74,19 +74,18 @@
         <span class="text-xs text-slate-400 mt-1">rule / AI / manual</span>
       </a>
       <a href="market_signals.html" class="flex flex-col items-center justify-center p-4 rounded-lg border hover:bg-slate-50 transition">
-        <span class="text-lg font-bold text-slate-700">시장 시그널 🇰🇷</span>
+        <span class="text-lg font-bold text-slate-700">시장 시그널</span>
         <span class="text-xs text-slate-400 mt-1">프로그램/투자자 매매</span>
       </a>
     </div>
   </section>
 
-  {# ── 시장 시그널 요약 (홈) — 한국(KR) 시장 ─────────────────────────── #}
+  {# ── 시장 시그널 요약 (홈) ─────────────────────────── #}
   {% if market_signals and market_signals.available %}
   <section class="bg-white rounded-lg shadow-sm p-4">
     <div class="flex items-center justify-between mb-2">
       <h2 class="text-base font-semibold">
         시장 시그널
-        <span class="pill bg-blue-100 text-blue-700 ml-1">🇰🇷 KR</span>
         <span class="text-xs font-normal text-slate-400 ml-2">KOSPI 프로그램/투자자 매매 · 역사적 {{ market_signals.lookback_days }}거래일 퍼센타일 기준</span>
       </h2>
       <a href="market_signals.html" class="text-xs text-blue-600 hover:underline whitespace-nowrap ml-4">자세히 보기 →</a>
@@ -191,9 +190,24 @@
   </section>
   {% endif %}
 
-  {# 변곡점 발생 종목 (오늘) — Action Required #}
+  {# 변곡점 발생 종목 — Action Required #}
   <section class="bg-white rounded-lg shadow-sm p-4">
-    <h2 class="text-base font-semibold mb-3">변곡점 발생 (Action Required)</h2>
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-base font-semibold">변곡점 발생 (Action Required)</h2>
+      <span class="text-xs text-slate-500 flex gap-3">
+        {% set kr_d = inflection_dates.get('KR', as_of) %}
+        {% set us_d = inflection_dates.get('US', as_of) %}
+        <span class="{% if kr_d != as_of %}text-amber-600 font-semibold{% endif %}">
+          🇰🇷 {{ kr_d | dow_fmt }}{% if kr_d != as_of %} ←최근거래일{% endif %}
+        </span>
+        <span class="{% if us_d != as_of %}text-amber-600 font-semibold{% endif %}">
+          🇺🇸 {{ us_d | dow_fmt }}{% if us_d != as_of %} ←최근거래일{% endif %}
+        </span>
+      </span>
+    </div>
+    <p class="text-xs text-slate-400 mb-3">
+      종가 ↔ MA10M(10개월 이동평균) 교차 종목 전체 · KR 16:30 KST / US 06:00 KST 마감 기준
+    </p>
     {% if inflections %}
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
@@ -261,7 +275,7 @@
       </table>
     </div>
     {% else %}
-      <p class="text-sm text-slate-500">오늘 변곡점 발생 없음.</p>
+      <p class="text-sm text-slate-500">변곡점 발생 종목 없음 (KR {{ inflection_dates.get("KR", as_of) | dow_fmt }} / US {{ inflection_dates.get("US", as_of) | dow_fmt }} 기준).</p>
     {% endif %}
   </section>
 

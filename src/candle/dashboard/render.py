@@ -69,8 +69,8 @@ def render(cfg: config.Config, on_date: date,
 
     tprint(f"[dashboard] 변곡점 lookup (on_date={on_date.isoformat()})...", flush=True)
     t0 = time.perf_counter()
-    inflections = _load_inflections(cfg, on_date, debug=debug)
-    tprint(f"[dashboard] 변곡점 완료 — {len(inflections)}종목 ({time.perf_counter()-t0:.1f}s)", flush=True)
+    inflections, inflection_dates = _load_inflections(cfg, on_date, debug=debug)
+    tprint(f"[dashboard] 변곡점 완료 — {len(inflections)}종목 ({time.perf_counter()-t0:.1f}s) [KR={inflection_dates.get('KR')} US={inflection_dates.get('US')}]", flush=True)
 
     inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
 
@@ -156,6 +156,17 @@ def render(cfg: config.Config, on_date: date,
     tprint(f"[dashboard] 시장 시그널 US 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     # ── 템플릿 렌더 ────────────────────────────────────────────────────────
+    DOW_KR = ["월", "화", "수", "목", "금", "토", "일"]
+
+    def _dow_fmt(date_str: object) -> str:
+        """YYYY-MM-DD → YYYY-MM-DD (요일) 형태로 변환."""
+        try:
+            from datetime import date as _date
+            d = _date.fromisoformat(str(date_str))
+            return f"{date_str} ({DOW_KR[d.weekday()]})"
+        except Exception:
+            return str(date_str)
+
     def _uk_fmt(value: object) -> str:
         """억 단위 숫자를 '3조 3664억' 형태로 변환."""
         try:
@@ -177,15 +188,16 @@ def render(cfg: config.Config, on_date: date,
         autoescape=select_autoescape(["html"]),
     )
     env.filters["uk_fmt"] = _uk_fmt
+    env.filters["dow_fmt"] = _dow_fmt
 
     # 전략 type 이름 설명 (모든 페이지 공통)
     type_descriptions = {
-        "type1_1":  ("변곡점 신호 · 고정수량",      "MA10M 교차(-→+) 매수 / (+→-) 매도, 10주 고정"),
-        "type1_2":  ("변곡점 신호 · 전액매수",       "MA10M 교차(-→+) 전액 매수 / (+→-) 전량 매도"),
-        "type2_1":  ("연속일수(8/4) · 고정수량",    "+8일 연속 → 매수 / -4일 연속 → 매도, 10주 고정"),
-        "type2_2":  ("연속일수(8/4) · 전액매수",    "+8일 연속 → 전액 매수 / -4일 연속 → 전량 매도"),
-        "type2_1b": ("연속일수(33/5) · 고정수량",   "+33일 연속 → 매수 / -5일 연속 → 매도, 10주 고정"),
-        "type2_2b": ("연속일수(33/5) · 전액매수",   "+33일 연속 → 전액 매수 / -5일 연속 → 전량 매도"),
+        "type1_1":  ("변곡점 신호 · 고정수량 매수·매도",      "MA10M 교차(-→+) 매수 / (+→-) 매도, 10주 고정"),
+        "type1_2":  ("변곡점 신호 · 전액매수·전량매도",    "MA10M 교차(-→+) 전액 매수 / (+→-) 전량 매도"),
+        "type2_1":  ("연속일수(8/4) · 고정수량 매수·매도",  "+8일 연속 → 매수(10주 고정) / -4일 연속 → 매도(10주 고정)"),
+        "type2_2":  ("연속일수(8/4) · 전액매수·전량매도",   "+8일 연속 → 전액 매수 / -4일 연속 → 전량 매도"),
+        "type2_1b": ("연속일수(33/5) · 고정수량 매수·매도", "+33일 연속 → 매수(10주 고정) / -5일 연속 → 매도(10주 고정)"),
+        "type2_2b": ("연속일수(33/5) · 전액매수·전량매도",  "+33일 연속 → 전액 매수 / -5일 연속 → 전량 매도"),
         "type3":    ("적립식 90일 주기",             "90일마다 일정 금액 입금 후 전액 매수 (매도 없음)"),
     }
 
@@ -205,12 +217,15 @@ def render(cfg: config.Config, on_date: date,
         counts=counts,
         type_counts=type_counts,
         inflections=inflections,
+        inflection_dates=inflection_dates,
         period_table=period_table,
         periods=bt_periods,
         type_descriptions=type_descriptions,
         name_map=name_map,
         period_table_by_ticker=period_table_by_ticker,
         market_signals=market_signal_ctx,
+        enabled_types=cfg.enabled_types,
+        disabled_types=cfg.disabled_types,
         market_signals_us=market_signal_us_ctx,
         foreign_snapshot=foreign_snapshot,
     )
@@ -424,6 +439,8 @@ def _load_decisions(cfg: config.Config, on_date: date,
             "name": meta["name"],
             "group_name": group,
             "rank_in_group": rank,
+            "date": str(r.get("date", actual_date)),
+            "event_date": str(r["event_date"]) if "event_date" in r.index and not pd.isna(r.get("event_date")) else str(r.get("date", actual_date)),
             "source": str(r["source"]),
             "action": str(r["action"]),
             "qty": (None if pd.isna(r.get("qty")) or r.get("qty") == "" else float(r["qty"])),
@@ -434,25 +451,112 @@ def _load_decisions(cfg: config.Config, on_date: date,
     return rows, counts, type_counts, actual_date
 
 
-def _load_inflections(cfg: config.Config, on_date: date, debug: bool = False) -> list[dict]:
-    """오늘 변곡점이 발생한 종목."""
+def _market_effective_dates(cfg: "config.Config", on_date: "date") -> dict[str, str]:
+    """KST 현재 시각 + analyze_meta.csv 기반 시장별 유효 날짜 계산.
+
+    KR 장 마감: 16:30 KST  (= 이후이면 당일 KR 데이터 사용 가능)
+    US 장 마감: 06:00 KST  (= 이후이면 전일(US날짜) 데이터 사용 가능)
+
+    Step 1: 시장 마감 여부로 candidate 날짜 결정
+    Step 2: analyze_meta.csv 실제 분석 날짜로 clamp (공휴일/fetch 미실행 자동 처리)
+
+    Returns:
+        {'KR': 'YYYY-MM-DD', 'US': 'YYYY-MM-DD'}
+    """
+    import datetime as _dt
+
+    # ── KST 현재 시각 ────────────────────────────────────────────────────────
+    try:
+        import pytz as _pytz
+        _kst = _pytz.timezone("Asia/Seoul")
+        now_kst = _dt.datetime.now(_kst)
+    except ImportError:
+        # pytz 없으면 UTC+9 고정 offset 사용
+        now_kst = _dt.datetime.utcnow() + _dt.timedelta(hours=9)
+
+    today  = now_kst.date()
+    t_now  = now_kst.time()
+    wday   = today.weekday()   # 0=월, 4=금, 5=토, 6=일
+
+    def _prev_weekday(d: "_dt.date") -> "_dt.date":
+        d -= _dt.timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= _dt.timedelta(days=1)
+        return d
+
+    # ── KR candidate ─────────────────────────────────────────────────────────
+    # 평일 16:30 이후 → 오늘, 그 외 → 직전 평일
+    KR_CLOSE = _dt.time(16, 30)
+    if wday < 5 and t_now >= KR_CLOSE:
+        kr_cand = today
+    else:
+        kr_cand = _prev_weekday(today)
+
+    # ── US candidate ─────────────────────────────────────────────────────────
+    # US 장은 KST 기준 전날 22:00 ~ 다음날 06:00 운영
+    # 06:00 이후 → 어제(US 날짜)가 마감 → 어제 평일을 사용
+    # 06:00 이전 → 아직 미마감 → 이틀 전 평일을 사용
+    US_CLOSE = _dt.time(6, 0)
+    if wday < 5 and t_now >= US_CLOSE:
+        us_cand = _prev_weekday(today)   # 어제 US 날짜
+    else:
+        us_cand = _prev_weekday(_prev_weekday(today))   # 이틀 전
+
+    result = {"KR": kr_cand.isoformat(), "US": us_cand.isoformat()}
+
+    # ── analyze_meta.csv clamp ───────────────────────────────────────────────
+    # 실제로 fetch/analyze가 완료된 날짜보다 미래면 clamp (공휴일·수동 실행 대응)
+    meta_path = cfg.data_dir / "analyze_meta.csv"
+    if meta_path.exists():
+        try:
+            meta_df = pd.read_csv(meta_path)
+            if not meta_df.empty and "analyzed_to" in meta_df.columns and "market" in meta_df.columns:
+                for mkt in ("KR", "US"):
+                    sub = meta_df[meta_df["market"] == mkt]
+                    if sub.empty:
+                        continue
+                    last = str(sub["analyzed_to"].max())
+                    if last < result[mkt]:
+                        result[mkt] = last
+        except Exception as exc:
+            log.warning("analyze_meta.csv market clamp 실패: %s", exc)
+
+    tprint(f"[dashboard] 시장별 기준일 — KR={result['KR']} US={result['US']}", flush=True)
+    return result
+
+
+def _load_inflections(cfg: config.Config, on_date: date,
+                      debug: bool = False) -> tuple[list[dict], dict[str, str]]:
+    """변곡점 발생 종목 스캔. 시장별 마감 시각(KST) 기준으로 유효 날짜 결정.
+
+    KR: 16:30 KST 이전 → 전일, 이후 → 당일
+    US: 06:00 KST 이전 → 이틀 전, 이후 → 전일(US 날짜)
+    analyze_meta.csv로 실제 fetch 날짜 clamp (공휴일 자동 처리)
+
+    Returns:
+        (inflections_list, {'KR': date_str, 'US': date_str})
+    """
     inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
     if inst.empty:
-        return []
-    target = on_date.isoformat()
+        return [], {"KR": on_date.isoformat(), "US": on_date.isoformat()}
+
+    # 시장별 유효 날짜
+    market_dates = _market_effective_dates(cfg, on_date)
+
     out: list[dict] = []
     total = len(inst)
     _step = max(1, min(50, total // 10))
     if debug:
-        tprint(f"[dashboard][debug] inflection scan {total}개 ticker")
+        tprint(f"[dashboard][debug] inflection scan {total}개 ticker KR={market_dates['KR']} US={market_dates['US']}")
     for i, (_, row) in enumerate(inst.iterrows(), start=1):
         if i % _step == 0 or i == total:
             tprint(f"[dashboard] 변곡점 scan {i}/{total} ({i/total*100:.0f}%)", flush=True)
         tk = str(row["ticker"])
         mkt = str(row["market"])
         group = str(row["group_name"])
+        target = market_dates.get(mkt, market_dates.get("KR", on_date.isoformat()))
         if debug:
-            tprint(f"[dashboard][debug] ({i}/{total}) {mkt}/{tk} ({group}) start")
+            tprint(f"[dashboard][debug] ({i}/{total}) {mkt}/{tk} ({group}) target={target}")
         t0 = time.perf_counter()
         df = csv_io.read(paths.daily_csv(cfg.data_dir, mkt, tk))
         if df.empty or "inflection" not in df.columns:
@@ -482,7 +586,7 @@ def _load_inflections(cfg: config.Config, on_date: date, debug: bool = False) ->
         })
         if debug:
             tprint(f"[dashboard][debug] ({i}/{total}) {mkt}/{tk} end ({time.perf_counter()-t0:.2f}s) — inflection={infl}")
-    return out
+    return out, market_dates
 
 
 def _maybe_float(v) -> float | None:
@@ -539,12 +643,14 @@ def _build_period_table(cfg: config.Config) -> tuple[list[dict], list[str]]:
 
     반환:
         rows   : [{ticker, name, group_name, currency, rank_in_group,
-                   period_returns: {period: {best_return, detail: {type: ret}}}}, ...]
+                   period_returns: {period: {best_return, best_type, detail: {type: ret}}}}, ...]
         periods: 정렬된 기간 문자열 목록
     """
     period_list = paths.list_backtest_periods(cfg.output_dir)
     if not period_list:
         return [], []
+
+    enabled_set: set[str] = set(cfg.enabled_types)
 
     # instruments 이름/그룹 lookup
     inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
@@ -592,9 +698,14 @@ def _build_period_table(cfg: config.Config) -> tuple[list[dict], list[str]]:
         meta = inst_map.get(tk, {"name": tk, "group_name": "", "currency": ""})
         period_returns: dict[str, dict] = {}
         for period, type_map in period_map.items():
-            best_ret = max(type_map.values()) if type_map else None
+            # enabled_types 기준으로 best 선택 (없으면 전체 fallback)
+            enabled_map = {t: r for t, r in type_map.items() if t in enabled_set}
+            cand_map = enabled_map if enabled_map else type_map
+            best_type = max(cand_map, key=lambda t: cand_map[t]) if cand_map else None
+            best_ret  = cand_map[best_type] if best_type is not None else None
             period_returns[period] = {
                 "best_return": round(best_ret, 4) if best_ret is not None else None,
+                "best_type":   best_type,
                 "detail": {t: round(r, 4) for t, r in type_map.items()},
             }
         rows.append({
@@ -816,6 +927,9 @@ def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
         type_name = type_dir.name
         for ticker, grp in adf.groupby("ticker"):
             tk = str(ticker)
+            # KR 종목 ticker: _all.csv에 선행 0 없이 저장되므로 6자리로 zero-pad
+            if tk.isdigit() and len(tk) < 6:
+                tk = tk.zfill(6)
             cols = ["date", "side", "price", "qty", "amount",
                     "holding_qty", "holding_value", "cash", "return_pct"]
             cols = [c for c in cols if c in grp.columns]

@@ -1,13 +1,13 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-17 (11차)
+date: 2026-05-17 (12차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-17 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(KR+US) 대시보드 추가. Makefile KR/US 분리 파이프라인. 리스크 지표(MDD·승률·평균보유일) + 거래 이력 상세 페이지 + 미국 시장 시그널(VIX·수익률 곡선) + KOSPI200 외국인/기관 매매 추가.**
+> **2026-05-17 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(KR+US) 대시보드 추가. Makefile KR/US 분리 파이프라인. 리스크 지표(MDD·승률·평균보유일) + 거래 이력 상세 페이지 + 미국 시장 시그널(VIX·수익률 곡선) + KOSPI200 외국인/기관 매매 추가. Worker CPU×1/2 기본값. enabled_types ON/OFF 뱃지. market calendar 수집. decisions 신호 확인일(마지막 거래일) 표시.**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 

@@ -1,30 +1,44 @@
-feat: 리스크 지표·거래상세·US시그널·외국인매매 + MDD설명·링크수정·US차트 (2026-05-16~17)
+feat: enabled_types·worker기본값·market calendar·decisions날짜·전략설명 수정 (2026-05-17)
 
-## Feature 3 — 리스크 지표 (MDD·승률·평균보유일)
-- `compare/run.py`: `_compute_risk_map()`, `_win_rate_and_hold()`, `_mdd_from_trades()` 신규
-- `strategy_summary.csv`, `per_ticker.csv`에 `avg_mdd`, `avg_win_rate`, `avg_hold_days` 컬럼 추가
-- `compare.html`: 설명 섹션(`<details>`) + 테이블 컬럼 3개 추가 (색상: MDD≤10%초록/≤25%주황/>25%빨강, 승률≥60%초록)
-- 활용: `make v2-compare` 후 전략별 요약 탭
+## config.py — enabled_types / disabled_types 프로퍼티
+- `ALL_TYPES` 상수 추가 (type1_1~type3 고정 순서)
+- `enabled_types`: strategies.yml의 enabled_types → ALL_TYPES 순서로 필터링. 없으면 전체 7개 하위호환
+- `disabled_types`: enabled에 없는 비활성 type 목록
 
-## Feature 8 — 백테스트 거래 상세 페이지
-- `render.py`: `_generate_trade_jsons()` → `dashboard_site/data/trades/{ticker}.json`
-- `ticker_trades.html` 신규: URL 해시 기반(`#005930`), JS fetch로 요약 카드 + 거래 테이블 표시
-- 404 시 "백테스트가 실행되지 않은 종목" 친화적 안내 메시지
-- `group_returns.html`: `tickers_with_trades` 집합으로 데이터 있는 종목만 링크 표시
-- `_nav.html`: "거래 이력" 독립 메뉴 제거 (group_returns 상세 행 링크로만 접근)
-- `render.py`: trade JSON 생성을 group_returns 렌더 전으로 이동
-- 활용: KOSPI200/SP500/ETF 페이지에서 종목 클릭 → 상세 펼치기 → "📋 거래 이력 상세 →"
+## cli.py — Worker 기본값 CPU×1/2 + enabled_types 연동
+- `_DEFAULT_WORKERS = max(1, (os.cpu_count() or 4) // 2)` — fetch/optimize-streak/backtest/compare 공통 적용
+- `backtest --types`, `compare --types`: 미지정 시 `cfg.enabled_types` 사용
+- `simulate`: `rule_types=cfg.enabled_types` 전달
 
-## Feature 10 — 미국 시장 시그널 (VIX + 수익률 곡선)
-- `fetch/market_signals_us.py` 신규: yfinance `^VIX`, `^TNX`, `^IRX` 증분 수집
-- `candle market-signals-us` CLI + `make v2-market-signals-us` 타겟
-- `market_signals.html`: KR/US Alpine.js 탭 분리. US 탭에 VIX 3개월 막대 SVG + Spread 꺾은선 SVG + 테이블 + 용어 설명
-- `render.py`: `_load_market_signals_us()` + `common_ctx["market_signals_us"]`
-- 활용: `make v2-market-signals-us` → `make v2-dashboard` → 시장 시그널 페이지 US 탭
+## simulate/run.py + _type_legend.html
+- `rule_types` 파라미터 수용 → enabled types만 신호 평가
+- _type_legend.html: enabled/disabled 뱃지 스타일 분리
 
-## Feature 13 — KOSPI200 외국인/기관 종목별 매매
-- `fetch/foreign_trading.py` 신규: pykrx per-ticker, ThreadPoolExecutor 4-worker 병렬
-- `candle foreign-trading` CLI + `make v2-foreign-trading` 타겟
-- `group_returns.html`: KOSPI200 종목 상세 행에 외국인/기관 5일 순매수 합산 표시
-- 활용: `make v2-foreign-trading` → `make v2-dashboard` → KOSPI200 종목 클릭
+## optimize/streak_grid.py — --debug 없이도 진행 상황 출력
+- 핵심 진행 메시지들(`_debug_log(debug, ...)` → `tprint(...)`)로 변경
+- 변경 위치: 로딩 시작/완료(100개 단위), 그룹별 grid search 시작/완료, combo 진행(20개 단위 elapsed+ETA), per-ticker 종목별 완료
 
+## dashboard/render.py — 전략 설명 + ON/OFF 뱃지 + best_type 필터
+- type 설명 수정: "전액매수" → "전액매수·전량매도", "고정수량" → "고정수량 매수·매도"
+- `enabled_types`, `disabled_types` → common_ctx 추가
+- best_type: enabled_types 기준으로 결정
+- `_dow_fmt` Jinja2 필터 추가 (YYYY-MM-DD → YYYY-MM-DD (요일))
+- group_returns.html: disabled type 행 `opacity-50 bg-slate-300` ON/OFF 뱃지
+
+## fetch/run.py + storage/paths.py — market calendar 수집
+- `paths.market_calendar_csv(data_dir)` 추가 → `data/market_calendar.csv`
+- `_build_market_calendar(data_dir, market)`:
+  - 증분 업데이트: 기존 calendar max_date 이후만 집계
+  - 속도 최적화: 파일별 마지막 줄만 읽어 비교 (22초 → 1.5초)
+  - 컬럼: `date, is_kr_trading, is_us_trading`
+- fetch 완료 후 KR/US 자동 호출
+
+## simulate/engine.py — decisions date = 신호 확인일(마지막 거래일)
+- rule decisions: `"date": on_date.isoformat()` → `"date": str(cur_row.get("date", on_date.isoformat()))`
+- `event_date` 컬럼 추가: type1=변곡점 발생일, type2=streak 시작일
+- decisions.csv 스키마: `decision_id, date, ticker, source, action, qty, price, reason, event_date, raw_json_path`
+
+## decisions.html — 날짜 칼럼 주/부 표시 교체
+- 주 표시: `date (요일)` (마지막 거래일, 신호 확인일)
+- 부 표시: `event_date` (연속 시작일, 다를 때만)
+- `dow_fmt` 필터 적용

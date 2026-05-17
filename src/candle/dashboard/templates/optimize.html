@@ -33,8 +33,19 @@
       curGroup:     'all',
       sortCol:      'avg_return',
       sortDir:      -1,
-      plusVals:     [4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36,38,40],
-      minusVals:    [4,6,8,10],
+      plusVals:     [],
+      minusVals:    [],
+
+      _recomputeRanges: function() {
+        var src = this.curRows();
+        var plusSet = {}, minusSet = {};
+        for (var i = 0; i < src.length; i++) {
+          plusSet[+src[i].plus_days] = true;
+          minusSet[+src[i].minus_days] = true;
+        }
+        this.plusVals  = Object.keys(plusSet).map(Number).sort(function(a,b){return a-b;});
+        this.minusVals = Object.keys(minusSet).map(Number).sort(function(a,b){return a-b;});
+      },
       // per-ticker (ETF only)
       curTicker:    null,
       tickerSortCol: 'avg_return',
@@ -141,7 +152,7 @@
         return 'bg-rose-100 text-rose-700';
       },
 
-      init: function() { this.curGroup = 'all'; this.curTicker = null; },
+      init: function() { this.curGroup = 'all'; this.curTicker = null; this._recomputeRanges(); },
 
       curRows: function() {
         return this.allData[this.curGroup] || [];
@@ -184,6 +195,7 @@
         this.sortCol  = 'avg_return';
         this.sortDir  = -1;
         this.curTicker = null;  // 그룹 전환 시 ticker 선택 초기화
+        this._recomputeRanges();
       },
 
       setSort: function(col) {
@@ -242,26 +254,32 @@
     <h2 class="text-base font-semibold mb-3">📖 이 최적화는 무엇인가?</h2>
     <div class="text-sm text-slate-700 space-y-2 leading-relaxed">
       <p>
-        <strong>type2_1b / type2_2b 전략</strong>은
+        <strong>type2_2b 전략</strong>은
         MA10M_UPDOWN(10월 이동평균 대비 현재가 방향)이
         <code class="bg-emerald-50 text-emerald-700 px-1 rounded">plus_days</code>일 연속
-        <strong class="text-emerald-700">+</strong>가 되면 <strong class="text-emerald-700">매수</strong>,
+        <strong class="text-emerald-700">+</strong>가 되면 <strong class="text-emerald-700">보유 현금 전액으로 매수</strong>,
         <code class="bg-rose-50 text-rose-700 px-1 rounded">minus_days</code>일 연속
-        <strong class="text-rose-700">-</strong>가 되면 <strong class="text-rose-700">매도</strong>하는 추세추종 전략입니다.
+        <strong class="text-rose-700">-</strong>가 되면 <strong class="text-rose-700">전량 매도</strong>하는 추세추종 전략입니다.
       </p>
       <p>
-        <code class="bg-slate-100 px-1 rounded">plus_days ∈ {4,6,…,40}</code> ×
-        <code class="bg-slate-100 px-1 rounded">minus_days ∈ {4,6,8,10}</code> = <strong>76가지 조합</strong>을
-        KOSPI200·S&P500·ETF 전 종목에 대해 시뮬레이션하여 최적 파라미터를 찾습니다.
+        이 최적화는 <strong>type2_2b 방식(전액 매수/전량 매도)</strong>을 기준으로 시뮬레이션합니다.
+        <code class="bg-slate-100 px-1 rounded text-xs">type2_1b</code>는 매수 시 10주만 사는 방식이라
+        현실적이지 않아 최적화 대상에서 제외합니다.
+      </p>
+      <p>
+        <code class="bg-slate-100 px-1 rounded">plus_days</code> ×
+        <code class="bg-slate-100 px-1 rounded">minus_days</code> 의 <strong>홀수 조합</strong>을
+        KOSPI200·S&amp;P500·ETF 전 종목에 대해 시뮬레이션하여 최적 파라미터를 찾습니다.
+        실제 조합 수는 아래 "마지막 최적화 실행 정보" 의 <strong>조합 수</strong>를 확인하세요.
       </p>
       <div class="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-800">
         <strong>최적 파라미터 적용</strong>:
         <code class="bg-amber-100 px-1 rounded">config/strategies.yml</code>의
-        <code class="bg-amber-100 px-1 rounded">type2_1b</code> /
         <code class="bg-amber-100 px-1 rounded">type2_2b</code> 의
         <code class="bg-amber-100 px-1 rounded">plus_days</code> /
         <code class="bg-amber-100 px-1 rounded">minus_days</code> 수정 후
         <code class="bg-amber-100 px-1 rounded">make v2-backtest</code> 재실행.
+        (type2_1b는 고정 10주 매수 방식이므로 plus/minus_days 최적화 결과를 적용하지 않습니다.)
       </div>
     </div>
 

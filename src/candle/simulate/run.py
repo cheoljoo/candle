@@ -11,7 +11,8 @@ from . import engine, manual
 log = logging.getLogger(__name__)
 
 
-def run(cfg: config.Config, on_date: date, use_ai: bool = True, debug: bool = False) -> dict[str, int]:
+def run(cfg: config.Config, on_date: date, use_ai: bool = True, debug: bool = False,
+        rule_types: list[str] | None = None) -> dict[str, int]:
     announce(
         f"simulate --today {on_date.isoformat()} {'--ai' if use_ai else '--no-ai'}",
         inputs=[
@@ -36,4 +37,5 @@ def run(cfg: config.Config, on_date: date, use_ai: bool = True, debug: bool = Fa
         ],
     )
     manual.ensure_template(cfg)
-    return engine.run(cfg, on_date, use_ai=use_ai, debug=debug)
+    _rule_types = rule_types if rule_types is not None else cfg.enabled_types
+    return engine.run(cfg, on_date, rule_types=_rule_types, use_ai=use_ai, debug=debug)

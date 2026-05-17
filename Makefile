@@ -4,7 +4,7 @@ SHELL := /bin/bash
 # debug 켜기:    make <target> DEBUG=--debug
 # 메일 발송 켜기: make <target> SENDMAIL=YES
 DEBUG    ?=
-SENDMAIL ?= 
+SENDMAIL ?= YES
 
 
 .PHONY: fetch analyze backtest-type1 backtest-type1-2020-2025 backtest-type1-2025-now \
@@ -144,9 +144,11 @@ v2-universe-small:
 
 v2-fetch:
 	set -o pipefail; uv run candle fetch --market all $(DEBUG) | tee v2-fetch.log
+	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-fetch.log" --body-file="./v2-fetch.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-fetch-full:
-	set -o pipefail; uv run candle fetch --market all --from 2000-01-01 --workers 4 --timeout 30 $(DEBUG) | tee v2-fetch-full.log
+	# --from DATE 옵션을 명시적으로 지정하면 기존 파일이 있어도 그 날짜부터 재수집합니다. make v2-fetch-full이 이 방식(--from 2000-01-01)을 사용합니다.
+	set -o pipefail; uv run candle fetch --market all --from 2000-01-01 --timeout 30 $(DEBUG) | tee v2-fetch-full.log
 	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-fetch-full.log" --body-file="./v2-fetch-full.log" --only-me --sendmail "$(SENDMAIL)"
 
 v2-analyze:
@@ -219,7 +221,7 @@ v2-dashboard:
 # SENDMAIL=YES 설정 시 완료 후 전체 수신자에게 메일 발송
 # 예) make v2-all SENDMAIL=YES
 #     make v2-all DEBUG=--debug SENDMAIL=YES
-v2-all: v2-gmail-etf v2-universe v2-fetch-full v2-analyze v2-backtest v2-simulate v2-market-signals v2-dashboard v2-sendmail
+v2-all: v2-gmail-etf v2-universe v2-fetch v2-analyze v2-backtest v2-simulate v2-market-signals v2-dashboard v2-sendmail
 v2-sendmail:
 	uv run python -u gmail_sender.py \
 		--sendmail "$(SENDMAIL)" \
@@ -236,9 +238,9 @@ v2-optimize:
 	set -o pipefail; uv run candle optimize-streak \
 		--all-groups \
 		--output-dir output/optimize \
-		--plus-min 4 --plus-max 40 --plus-step 2 \
-		--minus-min 4 --minus-max 10 --minus-step 2 \
-		--top 30 \
+		--plus-min 1 --plus-max 39 --plus-step 2 \
+		--minus-min 1 --minus-max 15 --minus-step 2 \
+		--top 30 --workers 2  \
 		$(DEBUG) | tee v2-optimize.log
 	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-optimize.log" --body-file="./v2-optimize.log" --only-me --sendmail "$(SENDMAIL)"
 	make v2-dashboard
@@ -324,68 +326,8 @@ v2-sendmail-us:
 v2-all-kr: v2-gmail-etf v2-fetch-kr v2-analyze-kr v2-backtest-kr v2-simulate v2-market-signals-kr v2-dashboard v2-sendmail-kr
 
 # ── US 파이프라인 (미국장 종료 후 ~09:00 KST 실행) ────────────────────────────
-# 순서: fetch(US) → analyze(US) → backtest(US) → simulate(전체) → dashboard → 메일
+# 순서: fetch(US) → analyze(US) → backtest(US) → simulate(전체) → market-signals-us → dashboard → 메일
 v2-all-us: v2-fetch-us v2-analyze-us v2-backtest-us v2-simulate v2-market-signals-us v2-dashboard v2-sendmail-us
-
-# ── KR 전용 단계 (한국장 종료 후 ~16:00 KST) ─────────────────────────────────
-v2-fetch-kr:
-	set -o pipefail; uv run candle fetch --market kr $(DEBUG) | tee v2-fetch-kr.log
-
-v2-analyze-kr:
-	set -o pipefail; uv run candle analyze --market kr $(DEBUG) | tee v2-analyze-kr.log
-	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-analyze-kr.log" --body-file="./v2-analyze-kr.log" --only-me --sendmail "$(SENDMAIL)"
-
-v2-backtest-compare-full-kr:
-	uv run candle backtest --from 2000-01-01 --label full --market kr $(DEBUG)
-	uv run candle compare  --from 2000-01-01 --label full $(DEBUG)
-
-v2-backtest-compare-5y-kr:
-	uv run candle backtest --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y --market kr $(DEBUG)
-	uv run candle compare  --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y $(DEBUG)
-
-v2-backtest-kr:
-	set -o pipefail; $(MAKE) -j v2-backtest-compare-full-kr v2-backtest-compare-5y-kr DEBUG="$(DEBUG)" | tee v2-backtest-kr.log
-	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-backtest-kr.log" --body-file="./v2-backtest-kr.log" --only-me --sendmail "$(SENDMAIL)"
-
-v2-sendmail-kr:
-	uv run python -u gmail_sender.py \
-		--sendmail "$(SENDMAIL)" \
-		--subject="[candle][v2] $$(date +%Y-%m-%d) 투자 리포트 (한국 update)" \
-		--decisions-json="./dashboard_site/data/decisions.json"
-
-# ── US 전용 단계 (미국장 종료 후 ~09:00 KST) ──────────────────────────────────
-v2-fetch-us:
-	set -o pipefail; uv run candle fetch --market us $(DEBUG) | tee v2-fetch-us.log
-
-v2-analyze-us:
-	set -o pipefail; uv run candle analyze --market us $(DEBUG) | tee v2-analyze-us.log
-	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-analyze-us.log" --body-file="./v2-analyze-us.log" --only-me --sendmail "$(SENDMAIL)"
-
-v2-backtest-compare-full-us:
-	uv run candle backtest --from 2000-01-01 --label full --market us $(DEBUG)
-	uv run candle compare  --from 2000-01-01 --label full $(DEBUG)
-
-v2-backtest-compare-5y-us:
-	uv run candle backtest --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y --market us $(DEBUG)
-	uv run candle compare  --from $$(date -d '5 years ago' +%Y-%m-%d) --label 5y $(DEBUG)
-
-v2-backtest-us:
-	set -o pipefail; $(MAKE) -j v2-backtest-compare-full-us v2-backtest-compare-5y-us DEBUG="$(DEBUG)" | tee v2-backtest-us.log
-	uv run python -u gmail_sender.py --subject="[candle][v2][progress] $$(date +%Y-%m-%d) v2-backtest-us.log" --body-file="./v2-backtest-us.log" --only-me --sendmail "$(SENDMAIL)"
-
-v2-sendmail-us:
-	uv run python -u gmail_sender.py \
-		--sendmail "$(SENDMAIL)" \
-		--subject="[candle][v2] $$(date +%Y-%m-%d) 투자 리포트 (미국 update)" \
-		--decisions-json="./dashboard_site/data/decisions.json"
-
-# ── KR 파이프라인 (한국장 종료 후 ~16:00 KST 실행) ────────────────────────────
-# 순서: gmail-etf → fetch(KR) → analyze(KR) → backtest(KR) → simulate(전체) → market-signals → dashboard → 메일
-v2-all-kr: v2-gmail-etf v2-fetch-kr v2-analyze-kr v2-backtest-kr v2-simulate v2-market-signals v2-dashboard v2-sendmail-kr
-
-# ── US 파이프라인 (미국장 종료 후 ~09:00 KST 실행) ────────────────────────────
-# 순서: fetch(US) → analyze(US) → backtest(US) → simulate(전체) → dashboard → 메일
-v2-all-us: v2-fetch-us v2-analyze-us v2-backtest-us v2-simulate v2-dashboard v2-sendmail-us
 
 # ── smoke (소규모 universe 빠른 검증) ─────────────────────────────────────────
 v2-smoke:

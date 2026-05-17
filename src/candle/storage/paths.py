@@ -24,6 +24,11 @@ def dividends_csv(data_dir: Path) -> Path:
     return data_dir / "events" / "dividends.csv"
 
 
+def market_calendar_csv(data_dir: Path) -> Path:
+    """data/market_calendar.csv — 날짜별 KR/US 거래일 여부."""
+    return data_dir / "market_calendar.csv"
+
+
 def analyze_dir(output_dir: Path, date: str) -> Path:
     return output_dir / "analyze" / date
 

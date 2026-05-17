@@ -81,9 +81,10 @@
             {% endif %}
             {% for p in periods %}
             {% set ret = row.period_returns.get(p, {}).get('best_return') %}
+            {% set btype = row.period_returns.get(p, {}).get('best_type') %}
             <td class="px-3 py-2 text-right tabular-nums font-semibold
               {% if ret is not none %}{% if ret >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}{% else %}text-slate-300{% endif %}">
-              {% if ret is not none %}{{ "%.1f"|format(ret) }}%{% else %}—{% endif %}
+              {% if ret is not none %}{{ "%.1f"|format(ret) }}%{% if btype %}<br><span class="font-normal text-slate-400 text-xs">{{ btype }}</span>{% endif %}{% else %}—{% endif %}
             </td>
             {% endfor %}
           </tr>
@@ -95,8 +96,7 @@
                 {# 거래 이력 링크 — backtest 데이터가 있는 종목만 표시 #}
                 {% if row.ticker in tickers_with_trades %}
                 <a href="ticker_trades.html#{{ row.ticker }}"
-                   class="text-xs px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 inline-flex items-center gap-1"
-                   target="_blank">📋 거래 이력 상세 →</a>
+                   class="text-xs px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded border border-indigo-200 inline-flex items-center gap-1">📋 거래 이력 상세 →</a>
                 {% else %}
                 <span class="text-xs text-slate-400 italic">거래 이력 없음 (백테스트 데이터 필요)</span>
                 {% endif %}
@@ -136,8 +136,15 @@
                     {% endfor %}
                   {% endfor %}
                   {% for type_name in all_types|sort %}
-                  <tr class="border-t border-slate-200">
-                    <td class="py-1 pr-4 font-mono">{{ type_name }}</td>
+                  <tr class="border-t border-slate-200{% if type_name not in enabled_types %} opacity-50{% endif %}">
+                    <td class="py-1 pr-4 font-mono text-sm">
+                      {{ type_name }}
+                      {% if type_name in enabled_types %}
+                      <span class="ml-1 text-xs px-1 py-0.5 bg-emerald-100 text-emerald-700 rounded font-sans">ON</span>
+                      {% else %}
+                      <span class="ml-1 text-xs px-1 py-0.5 bg-slate-200 text-slate-400 rounded font-sans">OFF</span>
+                      {% endif %}
+                    </td>
                     {% for p in periods %}
                     {% set ret = row.period_returns.get(p, {}).get('detail', {}).get(type_name) %}
                     <td class="py-1 px-3 text-right tabular-nums

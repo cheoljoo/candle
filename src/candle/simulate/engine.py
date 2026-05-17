@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 DECISIONS_COLUMNS = [
     "decision_id", "date", "ticker", "source", "action",
-    "qty", "price", "reason", "raw_json_path",
+    "qty", "price", "reason", "event_date", "raw_json_path",
 ]
 TRADES_COLUMNS = [
     "trade_id", "decision_id", "date", "ticker", "side",
@@ -86,16 +86,17 @@ def run(cfg: config.Config, on_date: date,
             res = _rule_signal(type_name, daily, cur_row, cfg)
             if res is None:
                 continue
-            action, reason = res
+            action, reason, event_date = res
             rule_decisions.append({
                 "decision_id": str(uuid.uuid4())[:8],
-                "date": on_date.isoformat(),
+                "date": str(cur_row.get("date", on_date.isoformat())),  # 마지막 거래일(신호 확인일)
                 "ticker": tk,
                 "source": f"rule:{type_name}",
                 "action": action,
                 "qty": _rule_qty(type_name, cfg, action),
                 "price": float(pd.to_numeric(cur_row.get("close"), errors="coerce")),
                 "reason": reason,
+                "event_date": event_date,
                 "raw_json_path": "",
             })
         if debug:
@@ -155,17 +156,19 @@ def _rule_qty(type_name: str, cfg: config.Config, action: str) -> float | None:
 
 
 def _rule_signal(type_name: str, daily: pd.DataFrame, cur_row: pd.Series,
-                 cfg: config.Config) -> tuple[str, str] | None:
-    """오늘 row 기준으로 신호 발화 여부."""
+                 cfg: config.Config) -> tuple[str, str, str] | None:
+    """오늘 row 기준으로 신호 발화 여부.
+    반환: (action, reason, event_date) — event_date는 변곡점/연속 시작일."""
     s = cfg.strategies
+    cur_date = str(cur_row["date"])
     if type_name in ("type1_1", "type1_2"):
         infl = cur_row.get("inflection")
         if pd.isna(infl):
             return None
         if infl == "-→+":
-            return ("buy", "MA10M 변곡 -→+")
+            return ("buy", "MA10M 변곡 -→+", cur_date)
         if infl == "+→-":
-            return ("sell", "MA10M 변곡 +→-")
+            return ("sell", "MA10M 변곡 +→-", cur_date)
         return None
 
     if type_name in ("type2_1", "type2_2", "type2_1b", "type2_2b"):
@@ -174,14 +177,13 @@ def _rule_signal(type_name: str, daily: pd.DataFrame, cur_row: pd.Series,
         return _streak_signal(daily, cur_row, plus_days, minus_days)
 
     if type_name == "type3":
-        # 마지막 매수일로부터 90일 경과 시 buy
-        return ("buy", "적립식 90일 주기")
+        return ("buy", "적립식 90일 주기", cur_date)
 
     return None
 
 
 def _streak_signal(daily: pd.DataFrame, cur_row: pd.Series,
-                   plus_days: int, minus_days: int) -> tuple[str, str] | None:
+                   plus_days: int, minus_days: int) -> tuple[str, str, str] | None:
     cur_date = cur_row["date"]
     idx_list = daily.index[daily["date"] == cur_date].tolist()
     if not idx_list:
@@ -197,10 +199,13 @@ def _streak_signal(daily: pd.DataFrame, cur_row: pd.Series,
             streak += 1
         else:
             break
+    # 연속 시작일 (패턴이 시작된 날) 계산
+    streak_start_idx = max(0, idx - (streak - 1))
+    streak_start_date = str(daily.iloc[streak_start_idx]["date"])
     if sign == "+" and streak == plus_days:
-        return ("buy", f"+{plus_days}일 연속 유지")
+        return ("buy", f"+{plus_days}일 연속 유지", streak_start_date)
     if sign == "-" and streak == minus_days:
-        return ("sell", f"-{minus_days}일 연속 유지")
+        return ("sell", f"-{minus_days}일 연속 유지", streak_start_date)
     return None
 
 

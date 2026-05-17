@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import time
 from collections import defaultdict
@@ -60,7 +61,7 @@ def _print_ticker_chunks(label: str, tickers: list[str], per_line: int = 20) -> 
 
 
 def run(cfg: config.Config, market: str, today: date,
-        debug: bool = False, workers: int = 4, timeout: int = 10,
+        debug: bool = False, workers: int = max(1, (os.cpu_count() or 4) // 2), timeout: int = 10,
         from_date: date | None = None) -> dict[str, int]:
     announce(
         f"fetch --market {market}",
@@ -133,8 +134,101 @@ def run(cfg: config.Config, market: str, today: date,
             overwrite=False,
         )
 
+    # ── market calendar 업데이트 ─────────────────────────────────────
+    if market in ("all", "KR"):
+        _build_market_calendar(cfg.data_dir, "KR")
+    if market in ("all", "US"):
+        _build_market_calendar(cfg.data_dir, "US")
+
     return {"fetched": fetched, "skipped": skipped, "failed": len(failed),
             "failed_tickers": failed[:10]}
+
+
+def _build_market_calendar(data_dir: "Path", market: str) -> None:  # noqa: F821
+    """daily 파일에서 거래일 집계 → data/market_calendar.csv 증분 업데이트.
+
+    컬럼: date, is_kr_trading(bool), is_us_trading(bool)
+    - 기존 calendar의 최신 날짜 이후 데이터만 집계 (증분) → fetch 반복 시 빠름.
+    - 처음 실행 시(파일 없음)에는 전체 historical 날짜 집계.
+    """
+    from pathlib import Path as _Path
+    daily_dir = _Path(data_dir) / "daily" / market.upper()
+    if not daily_dir.exists():
+        return
+
+    files = sorted(daily_dir.glob("*.csv"))
+    if not files:
+        return
+
+    col = "is_kr_trading" if market.upper() == "KR" else "is_us_trading"
+    cal_path = _Path(data_dir) / "market_calendar.csv"
+
+    # 기존 calendar 최신 날짜 확인 (증분 기준)
+    max_existing = "1900-01-01"
+    existing: "pd.DataFrame | None" = None
+    if cal_path.exists():
+        try:
+            existing = pd.read_csv(cal_path)
+            if col in existing.columns:
+                traded = existing[existing[col] == True]
+                if not traded.empty:
+                    max_existing = traded["date"].max()
+        except Exception:
+            existing = None
+
+    def _last_date_of_file(fpath: "Path") -> str:
+        """파일 끝 200바이트에서 마지막 행의 첫 컬럼(날짜)을 반환."""
+        import os as _os
+        try:
+            with open(fpath, "rb") as fobj:
+                size = _os.fstat(fobj.fileno()).st_size
+                fobj.seek(max(0, size - 200))
+                tail = fobj.read().decode(errors="replace")
+            last = [ln for ln in tail.strip().splitlines() if ln][-1]
+            return last.split(",")[0].strip().strip('"')
+        except Exception:
+            return "1900-01-01"
+
+    # 1) 마지막 날짜 > max_existing 인 파일만 전체 읽기 (증분 최적화)
+    dates: set[str] = set()
+    for f in files:
+        try:
+            last = _last_date_of_file(f)
+            if last <= max_existing:
+                continue
+            df = pd.read_csv(f, usecols=["date"])
+            new_dates = df[df["date"].astype(str) > max_existing]["date"].astype(str).tolist()
+            dates.update(new_dates)
+        except Exception:
+            continue
+
+    if not dates:
+        print(f"[fetch] market_calendar.csv — {market} 신규 거래일 없음", flush=True)
+        return
+
+    new_df = pd.DataFrame({"date": sorted(dates), col: True})
+
+    if existing is not None:
+        merged = existing.merge(new_df, on="date", how="outer", suffixes=("", "_new"))
+        if col + "_new" in merged.columns:
+            merged[col] = (
+                merged[col].infer_objects(copy=False).fillna(False)
+                | merged[col + "_new"].infer_objects(copy=False).fillna(False)
+            )
+            merged = merged.drop(columns=[col + "_new"])
+        for c in ("is_kr_trading", "is_us_trading"):
+            if c not in merged.columns:
+                merged[c] = False
+        merged = merged.sort_values("date").reset_index(drop=True)
+        merged.to_csv(cal_path, index=False)
+    else:
+        for c in ("is_kr_trading", "is_us_trading"):
+            if c not in new_df.columns:
+                new_df[c] = False
+        new_df = new_df.sort_values("date").reset_index(drop=True)
+        new_df.to_csv(cal_path, index=False)
+
+    print(f"[fetch] market_calendar.csv 업데이트 — {market} +{len(dates)}개 날짜 (기준: {max_existing} 이후)", flush=True)
 
 
 # ── KR ─────────────────────────────────────────────────────────────────

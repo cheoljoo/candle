@@ -866,3 +866,83 @@
   - VIX 막대 차트: 경보 기준선(빨강 점선) + 공포(빨강)/주의(노랑)/안정(초록) 색상 바.
   - Spread 꺾은선 차트: 10Y-3M spread, 0 기준선(회색 점선), 역전 구간 포인트(빨강 원).
 
+
+---
+
+## 2026-05-17
+
+### enabled_types / disabled_types — strategies.yml 연동
+
+- **배경** : `config/strategies.yml`에 `enabled_types: [type1_2, type2_2, type2_2b, type3]` 항목이 있지만, CLI에서 types를 항상 전체 7개로 하드코딩해 무시되던 문제.
+- **수정** (`src/candle/config.py`)
+  - `ALL_TYPES` 상수 추가 (type1_1~type3 고정 순서).
+  - `enabled_types` 프로퍼티: `strategies.yml`의 `enabled_types`를 ALL_TYPES 순서로 필터링. 없으면 전체 7개 하위호환.
+  - `disabled_types` 프로퍼티: enabled에 없는 비활성 type 목록.
+- **수정** (`src/candle/cli.py`)
+  - `_DEFAULT_WORKERS = max(1, (os.cpu_count() or 4) // 2)` 추가 — Worker 기본값 CPU×1/2.
+  - `backtest`, `compare` 명령의 `--types` 옵션: 미지정 시 `cfg.enabled_types` 사용.
+  - `simulate` 명령: `rule_types=cfg.enabled_types` 전달.
+  - `fetch`, `optimize-streak` 명령: workers 기본값 `_DEFAULT_WORKERS`로 변경.
+- **수정** (`src/candle/simulate/run.py`, `src/candle/dashboard/templates/_type_legend.html`)
+  - simulate/run.py: `rule_types` 파라미터 수용, 해당 types만 신호 평가.
+  - _type_legend.html: enabled/disabled 뱃지 스타일 분리.
+
+### enabled_types 기반 ON/OFF 뱃지 + best_return 필터링 (dashboard)
+
+- **수정** (`src/candle/dashboard/render.py`)
+  - `enabled_types`, `disabled_types` → `common_ctx`에 추가.
+  - `_build_period_table()`: `best_return` 집계 시 enabled_types 기준으로 best_type 결정.
+  - `_load_decisions()`: 신호 날짜(`date`) = `cur_row["date"]`(마지막 거래일)로 사용.
+  - `DOW_KR`, `_dow_fmt` Jinja2 필터 추가 (날짜→요일 변환).
+  - type 설명 수정:
+    - `type1_1`: "변곡점 신호 · 고정수량 매수·매도"
+    - `type1_2`: "변곡점 신호 · 전액매수·전량매도" (전: "전액매수")
+    - `type2_1`: "연속일수(8/4) · 고정수량 매수·매도" (전: "고정수량")
+    - `type2_2`: "연속일수(8/4) · 전액매수·전량매도" (전: "전액매수")
+    - `type2_1b`, `type2_2b`: 동일 패턴 수정
+- **수정** (`src/candle/dashboard/templates/group_returns.html`)
+  - 전략 열에 ON/OFF 뱃지: disabled type은 `opacity-50 bg-slate-300` 스타일.
+- **결과** : disabled type 행이 시각적으로 흐릿하게 표시 → enabled type의 best_type이 강조됨.
+
+### -4일 연속 계산 거래일 기준 확인
+
+- **검증** : CJ대한통운(000120) daily 데이터 확인.
+  - 2026-05-12(화, -), 05-13(수, -), 05-14(목, -), 05-15(금, -) = 4일 연속.
+  - 2026-05-16(토), 05-17(일) — daily CSV에 없음 → 토/일 포함 아님 ✓.
+  - streak 계산은 daily CSV 기반이므로 이미 거래일 기준.
+
+### v2-optimize 진행 상황 표시 (--debug 없이도 가시화)
+
+- **문제** : `streak_grid.py` 핵심 진행 메시지들이 `_debug_log(debug, ...)` 함수 내부에서만 출력 → `--debug` 없으면 아무것도 출력 안 됨.
+- **수정** (`src/candle/optimize/streak_grid.py`)
+  - 로딩 시작/완료(100개 단위), 그룹별 grid search 시작/완료, combo 진행(20개 단위 elapsed+ETA), per-ticker 종목별 완료 메시지를 `print()` 직접 호출로 변경.
+  - 예: `[streak_grid] 전체 ticker streak 로딩 중... (823개, workers=2)`
+  - `_grid_search()` 내 `elif done % 20 == 0` → `tprint(...)` 직접 호출.
+
+### market calendar 수집 기능 추가
+
+- **수정** (`src/candle/storage/paths.py`)
+  - `market_calendar_csv(data_dir)` 경로 함수 추가 → `data/market_calendar.csv`.
+- **수정** (`src/candle/fetch/run.py`)
+  - `_build_market_calendar(data_dir, market)` 추가:
+    - 기존 calendar max_date 이후만 증분 집계.
+    - 속도 최적화: 파일별 마지막 줄만 읽어 비교 (22초 → 1.5초).
+    - 컬럼: `date, is_kr_trading(bool), is_us_trading(bool)`.
+    - KR/US 각 컬럼 병합 upsert.
+  - fetch 완료 후 `if market in ("all", "KR"): _build_market_calendar(...)` 자동 호출.
+- **결과** : `data/market_calendar.csv` — KR 6595일, US 6632일 거래일 기록.
+
+### 의사결정 날짜 = 마지막 거래일(신호 확인일)로 변경
+
+- **배경** : `on_date=2026-05-17(일)` 실행 시 date=2026-05-17이 표시되던 문제.
+  - 신호는 2026-05-15(금) 기준 → date도 2026-05-15가 맞아야 함.
+- **수정** (`src/candle/simulate/engine.py`)
+  - rule decisions: `"date": on_date.isoformat()` → `"date": str(cur_row.get("date", on_date.isoformat()))`.
+  - `event_date` 컬럼 추가: type1=변곡점 발생일, type2=streak 시작일 (연속 시작 행의 날짜).
+  - manual decisions: `on_date` 유지 (변경 없음).
+  - settlement 로직: `decision_date=2026-05-15` → `nxt > 2026-05-15` → 2026-05-18 체결 ✓.
+  - `decisions.csv` 스키마: `decision_id, date, ticker, source, action, qty, price, reason, event_date, raw_json_path`.
+- **수정** (`src/candle/dashboard/templates/decisions.html`)
+  - 기준일 헤더: `event_date` → `date` (마지막 거래일).
+  - 날짜 칼럼: `date (요일)` 주 표시, `event_date`(연속 시작일)를 괄호로 부 표시 (다를 때만).
+  - `dow_fmt` 필터 적용 (YYYY-MM-DD → YYYY-MM-DD (요일)).

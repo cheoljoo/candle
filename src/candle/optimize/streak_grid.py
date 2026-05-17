@@ -1,7 +1,11 @@
-"""plus_days / minus_days 그리드 서치 — type2_2 계열 최적화.
+"""plus_days / minus_days 그리드 서치 — type2_2b 계열 최적화.
 
-전략: MA10M_UPDOWN 이 + 방향으로 P일 연속 → 전액 매수
+전략: MA10M_UPDOWN 이 + 방향으로 P일 연속 → 보유 현금 전액 매수
       MA10M_UPDOWN 이 - 방향으로 M일 연속 → 전량 매도
+
+시뮬레이션 기준: type2_2b (전액 매수 / 전량 매도 방식)
+- type2_1b (10주 고정 매수) 는 현실적이지 않아 최적화 대상에서 제외.
+- 최적화 결과 (plus_days, minus_days) 는 type2_2b 전략에만 적용.
 
 접근:
   1) 각 ticker 의 streak(연속일수) 을 한 번만 계산 (O(N_tickers × N_rows)).
@@ -11,6 +15,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,6 +30,8 @@ from ..io_report import tprint
 from ..storage import csv_io, paths
 
 log = logging.getLogger(__name__)
+
+_DEFAULT_WORKERS: int = max(1, (os.cpu_count() or 4) // 2)
 
 
 def _debug_log(enabled: bool, message: str, *, flush: bool = False) -> None:
@@ -181,7 +188,7 @@ def run_all_groups(
     minus_min: int = 4,
     minus_max: int = 10,
     minus_step: int = 2,
-    workers: int = 4,
+    workers: int = _DEFAULT_WORKERS,
     top_n: int = 30,
     debug: bool = False,
 ) -> dict[str, pd.DataFrame]:
@@ -200,7 +207,7 @@ def run_all_groups(
     initial_capital = cfg.strategies["initial_capital"]
 
     # ── 1회 streak 로딩 (전체) ────────────────────────────────────────
-    _debug_log(debug, f"[streak_grid] 전체 ticker streak 로딩 중... ({len(inst)}개, workers={workers})", flush=True)
+    print(f"[streak_grid] 전체 ticker streak 로딩 중... ({len(inst)}개, workers={workers})", flush=True)
     t0 = time.perf_counter()
     ticker_list = [(str(r["ticker"]), str(r["market"]), str(r["currency"]),
                     str(r.get("group_name", "")))
@@ -229,10 +236,10 @@ def run_all_groups(
             else:
                 if debug:
                     print(f"[streak_grid][debug] ({done}/{n_total}) {mkt}/{tk} ({grp}) → SKIP (데이터 없음)", flush=True)
-            if debug and (done % 100 == 0 or done == n_total):
-                _debug_log(debug, f"[streak_grid]   로딩 {done}/{n_total}", flush=True)
+            if done % 100 == 0 or done == n_total:
+                print(f"[streak_grid]   로딩 {done}/{n_total}", flush=True)
 
-    _debug_log(debug, f"[streak_grid] 로딩 완료 — 유효 {len(loaded_all)}개, elapsed={time.perf_counter()-t0:.1f}s", flush=True)
+    print(f"[streak_grid] 로딩 완료 — 유효 {len(loaded_all)}개, elapsed={time.perf_counter()-t0:.1f}s", flush=True)
     if not loaded_all:
         return {}
 
@@ -267,14 +274,14 @@ def run_all_groups(
 
     for group_label, loaded in targets:
         if not loaded:
-            _debug_log(debug, f"[streak_grid] {group_label}: 데이터 없음, 건너뜀", flush=True)
+            print(f"[streak_grid] {group_label}: 데이터 없음, 건너뜀", flush=True)
             continue
-        _debug_log(debug, f"[streak_grid] [{group_label}] 그리드 서치 시작 — {len(loaded)}개 ticker", flush=True)
+        print(f"[streak_grid] [{group_label}] 그리드 서치 시작 — {len(loaded)}개 ticker", flush=True)
         df = _grid_search(loaded, plus_min, plus_max, plus_step,
                           minus_min, minus_max, minus_step, top_n, group_label, debug=debug)
         out_csv = output_dir / f"streak_grid_{group_label}.csv"
         df.to_csv(out_csv, index=False)
-        _debug_log(debug, f"[streak_grid] [{group_label}] 완료 → {out_csv.name}", flush=True)
+        print(f"[streak_grid] [{group_label}] 완료 → {out_csv.name}", flush=True)
         results[group_label] = df
 
     # ── 전체 그룹 종목별 개별 grid search 추가 실행 (4개 그룹 동시) ──
@@ -296,7 +303,7 @@ def run_all_groups(
             workers=workers, debug=debug,
         )
 
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    with ThreadPoolExecutor(max_workers=_DEFAULT_WORKERS) as ex:
         per_ticker_futs = [ex.submit(_run_per_ticker_group, g) for g in PER_TICKER_GROUPS]
         for fut in as_completed(per_ticker_futs):
             fut.result()  # 예외 전파
@@ -311,7 +318,7 @@ def run_per_ticker_group(
     plus_min: int = 4, plus_max: int = 40, plus_step: int = 2,
     minus_min: int = 4, minus_max: int = 10, minus_step: int = 2,
     top_n: int = 30,
-    workers: int = 4,
+    workers: int = _DEFAULT_WORKERS,
     debug: bool = False,
 ) -> dict[str, dict]:
     """ETF 그룹 내 각 ticker별로 독립적인 grid search 수행 (병렬).
@@ -347,7 +354,7 @@ def run_per_ticker_group(
         }
 
     summary: dict[str, dict] = {}
-    _debug_log(debug, f"[streak_grid] [{group_name}] 종목별 grid search 시작 — {n}개 ticker (workers={min(workers, n)})", flush=True)
+    print(f"[streak_grid] [{group_name}] 종목별 grid search 시작 — {n}개 ticker (workers={min(workers, n)})", flush=True)
     with ThreadPoolExecutor(max_workers=min(workers, n)) as ex:
         futs = {
             ex.submit(_one_ticker, item, idx, n): item[0]
@@ -358,11 +365,11 @@ def run_per_ticker_group(
             tk, best_dict = fut.result()
             summary[tk] = best_dict
             done += 1
-            _debug_log(debug, f"[streak_grid] [{group_name}] 완료 {done}/{n}: {tk}", flush=True)
+            print(f"[streak_grid] [{group_name}] 완료 {done}/{n}: {tk}", flush=True)
 
     (per_dir / "_summary.json").write_text(
         _json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-    _debug_log(debug, f"[streak_grid] [{group_name}] 종목별 전체 완료 — {len(summary)}개 → {per_dir}", flush=True)
+    print(f"[streak_grid] [{group_name}] 종목별 전체 완료 — {len(summary)}개 → {per_dir}", flush=True)
     return summary
 
 
@@ -415,7 +422,7 @@ def _grid_search(
             elif done % 20 == 0 or done == n_combos:
                 elapsed = time.perf_counter() - t0
                 eta = elapsed / done * (n_combos - done) if done < n_combos else 0
-                _debug_log(debug, f"[streak_grid] [{label}]   {done}/{n_combos} ({elapsed:.0f}s, 잔여 ~{eta:.0f}s)", flush=True)
+                print(f"[streak_grid] [{label}]   {done}/{n_combos} ({elapsed:.0f}s, 잔여 ~{eta:.0f}s)", flush=True)
 
     result_df = pd.DataFrame(rows).sort_values("avg_return", ascending=False).reset_index(drop=True)
     best = result_df.iloc[0]
@@ -440,7 +447,7 @@ def run(
     minus_min:  int   = 2,
     minus_max:  int   = 20,
     minus_step: int   = 1,
-    workers:    int   = 4,
+    workers:    int   = _DEFAULT_WORKERS,
     top_n:      int   = 30,
     output_csv: Path | None = None,
     debug:      bool  = False,

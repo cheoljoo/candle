@@ -20,8 +20,18 @@
 <header class="border-b bg-white">
   <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-semibold">Candle Dashboard — 오늘의 의사결정</h1>
-      <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
+      <h1 class="text-xl font-semibold">Candle Dashboard — 의사결정</h1>
+      <p class="text-xs text-slate-500">
+        생성 {{ generated_at }}
+        {% if decisions %}
+        · 기준일 <strong class="{% if decisions[0].date != as_of %}text-amber-600{% endif %}">{{ decisions[0].date | dow_fmt }}</strong>
+        {% if decisions[0].date != as_of %}
+        <span class="text-amber-600 ml-1">({{ as_of }} 데이터 없음 → 최근 거래일로 표시)</span>
+        {% endif %}
+        {% else %}
+        · 기준일 {{ as_of }}
+        {% endif %}
+      </p>
     </div>
   </div>
 </header>
@@ -251,6 +261,7 @@
       <table id="dec-tbl" class="min-w-full text-sm">
         <thead class="bg-slate-100 text-slate-600 text-xs">
           <tr>
+            <th class="text-left px-3 py-2 whitespace-nowrap">날짜</th>
             <th class="text-left px-3 py-2">그룹</th>
             <th class="text-right px-3 py-2">RANK</th>
             <th class="text-left px-3 py-2">Ticker</th>
@@ -267,6 +278,7 @@
           {# rule 탭: tab + type_filter 모두 확인 / AI·manual: tab만 #}
           <tr class="border-t hover:bg-slate-50"
               x-show="tab === '{{ d.tab }}' && (tab !== 'rule' || type_filter === 'all' || '{{ d.source }}' === ('rule:' + type_filter))">
+            <td class="px-3 py-2 font-mono text-xs text-slate-500 whitespace-nowrap">{{ d.date | dow_fmt }}{% if d.event_date and d.event_date != d.date %}<br><span class="text-slate-300">(연속 시작: {{ d.event_date | dow_fmt }})</span>{% endif %}</td>
             <td class="px-3 py-2 text-xs text-slate-400">{{ d.group_name }}</td>
             <td class="px-3 py-2 text-right tabular-nums text-slate-500 text-xs">
               {% if d.rank_in_group is not none %}{{ d.rank_in_group }}{% endif %}
