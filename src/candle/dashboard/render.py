@@ -392,6 +392,25 @@ def _load_decisions(cfg: config.Config, on_date: date,
     if today.empty:
         return [], {"rule": 0, "ai": 0, "manual": 0}, {}, actual_date
 
+    # 직전 날짜 decisions 로드 → (ticker, source) → action 매핑 (prev_action 비교용)
+    prev_action_map: dict[tuple[str, str], str] = {}
+    all_dates = sorted(df["date"].unique())
+    curr_idx = all_dates.index(actual_date) if actual_date in all_dates else -1
+    if curr_idx > 0:
+        prev_date = all_dates[curr_idx - 1]
+        prev_df = df[df["date"] == prev_date]
+        for _, pr in prev_df.iterrows():
+            prev_action_map[(str(pr["ticker"]), str(pr["source"]))] = str(pr["action"])
+
+    # enabled_types에 없는 rule type은 표시에서 제외 (disabled type의 stale rows 방어)
+    if cfg.enabled_types:
+        enabled_set = set(cfg.enabled_types)
+        def _is_enabled(src: str) -> bool:
+            if src.startswith("rule:"):
+                return src[5:] in enabled_set
+            return True  # ai, manual 등은 그대로 표시
+        today = today[today["source"].astype(str).map(_is_enabled)].copy()
+
     # type3 (적립식) rule 신호는 표시에서 제외
     today = today[today["source"].astype(str) != "rule:type3"].copy()
 
@@ -447,6 +466,11 @@ def _load_decisions(cfg: config.Config, on_date: date,
             "price": (None if pd.isna(r.get("price")) or r.get("price") == "" else float(r["price"])),
             "reason": str(r.get("reason", "")) if not pd.isna(r.get("reason")) else "",
             "tab": str(r["tab"]),
+            "prev_action": prev_action_map.get((tk, str(r["source"]))),
+            "signal_changed": (
+                prev_action_map.get((tk, str(r["source"]))) is not None
+                and prev_action_map.get((tk, str(r["source"]))) != str(r["action"])
+            ),
         })
     return rows, counts, type_counts, actual_date
 
@@ -878,6 +902,36 @@ def _load_optimize_results(cfg: config.Config) -> dict[str, list[dict]]:
     return result
 
 
+def _compute_buy_sell_returns(records: list[dict]) -> None:
+    """buy-sell 쌍으로 buy_sell_return_pct 계산 (in-place).
+
+    buy_sell_return_pct 컬럼이 없는 기존 CSV 파일을 위한 폴백.
+    buy_total = buy 시점의 holding_value + cash
+    sell_total = sell 시점의 holding_value + cash
+    buy_sell_return_pct = (sell_total - buy_total) / buy_total * 100
+    """
+    last_buy_total: float | None = None
+    for rec in records:
+        side = rec.get("side")
+        hv = rec.get("holding_value")
+        cash = rec.get("cash")
+        hv_f = float(hv) if hv is not None else 0.0
+        cash_f = float(cash) if cash is not None else None
+
+        if side == "buy" and cash_f is not None:
+            last_buy_total = hv_f + cash_f
+            rec.setdefault("buy_sell_return_pct", None)
+        elif (side == "sell" and cash_f is not None
+              and last_buy_total is not None and last_buy_total > 0):
+            sell_total = hv_f + cash_f
+            rec["buy_sell_return_pct"] = round(
+                (sell_total - last_buy_total) / last_buy_total * 100.0, 6
+            )
+            last_buy_total = None
+        else:
+            rec.setdefault("buy_sell_return_pct", None)
+
+
 def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
     """output/backtest/full/{type}/_all.csv 에서 종목별 거래 이력 JSON 생성.
 
@@ -933,13 +987,17 @@ def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
             if tk.isdigit() and len(tk) < 6:
                 tk = tk.zfill(6)
             cols = ["date", "side", "price", "qty", "amount",
-                    "holding_qty", "holding_value", "cash", "return_pct"]
+                    "holding_qty", "holding_value", "cash", "return_pct",
+                    "buy_sell_return_pct"]
             cols = [c for c in cols if c in grp.columns]
             records = grp[cols].fillna("").to_dict(orient="records")
             # None/NaN 정리
             clean = []
             for rec in records:
                 clean.append({k: (None if v == "" else v) for k, v in rec.items()})
+            # buy_sell_return_pct 가 CSV 에 없으면 buy-sell 쌍으로 계산
+            if "buy_sell_return_pct" not in grp.columns:
+                _compute_buy_sell_returns(clean)
             ticker_trades.setdefault(tk, {})[type_name] = clean
             ticker_count += 1
         tprint(f"[dashboard] 거래 JSON [{i}/{len(type_dirs)}] {type_dir.name} — {ticker_count}개 ticker ({time.perf_counter()-t_csv:.1f}s)", flush=True)

@@ -10,7 +10,7 @@ import pandas as pd
 TRADE_COLUMNS = [
     "type", "date", "ticker", "side",
     "price", "qty", "amount",
-    "holding_qty", "holding_value", "cash", "return_pct",
+    "holding_qty", "holding_value", "cash", "return_pct", "buy_sell_return_pct",
 ]
 
 
@@ -30,8 +30,10 @@ class Portfolio:
     def __post_init__(self):
         if self.initial_cash is not None:
             self.cash = float(self.initial_cash)
+        self._last_buy_total: float | None = None
 
-    def _record(self, dt: str, side: str, price: float, qty: float):
+    def _record(self, dt: str, side: str, price: float, qty: float,
+                buy_sell_return_pct: float | None = None):
         amount = price * qty
         self.trades.append({
             "type": self.type_name,
@@ -45,6 +47,7 @@ class Portfolio:
             "holding_value": float(self.qty * price),
             "cash": float(self.cash) if self.initial_cash is not None else None,
             "return_pct": self._current_return_pct(price),
+            "buy_sell_return_pct": buy_sell_return_pct,
         })
 
     def _current_return_pct(self, price: float) -> float | None:
@@ -76,6 +79,9 @@ class Portfolio:
             self.avg_cost = (self.avg_cost * self.qty + price * qty) / new_qty
         self.qty = new_qty
         self.buy_count += 1
+        # 다음 sell의 buy_sell_return_pct 계산을 위해 buy 시점 총자산 기록
+        if self.initial_cash is not None:
+            self._last_buy_total = float(self.qty * price + self.cash)
         self._record(dt, "buy", price, qty)
 
     def sell(self, dt: str, price: float, qty: float | None = None, all_out: bool = False):
@@ -91,7 +97,15 @@ class Portfolio:
         if self.qty == 0:
             self.avg_cost = 0.0
         self.sell_count += 1
-        self._record(dt, "sell", price, qty)
+        # Buy→Sell 사이클 수익률 계산
+        buy_sell_ret: float | None = None
+        if (self.initial_cash is not None
+                and self._last_buy_total is not None
+                and self._last_buy_total > 0):
+            sell_total = float(self.qty * price + self.cash)
+            buy_sell_ret = (sell_total - self._last_buy_total) / self._last_buy_total * 100.0
+            self._last_buy_total = None
+        self._record(dt, "sell", price, qty, buy_sell_return_pct=buy_sell_ret)
 
     def mark_to_market(self, dt: str, price: float):
         """to-date 도달 시 보유분 종가 평가 (실제 매도 아님)."""
@@ -143,6 +157,16 @@ class Portfolio:
             bqty = pd.to_numeric(buys_after["qty"],    errors="coerce").sum()
             bamt = pd.to_numeric(buys_after["amount"], errors="coerce").sum()
             p.avg_cost = float(bamt / bqty) if bqty > 0 else 0.0
+        # _last_buy_total 복원: 미결 buy 포지션이 있으면 마지막 buy 행의 holding_value + cash
+        if p.qty > 0 and not buys_after.empty and p.initial_cash is not None:
+            last_buy_row = buys_after.iloc[-1]
+            hv = float(pd.to_numeric(pd.Series([last_buy_row.get("holding_value")]),
+                                     errors="coerce").fillna(0).iloc[0])
+            ca = float(pd.to_numeric(pd.Series([last_buy_row.get("cash")]),
+                                     errors="coerce").fillna(0).iloc[0])
+            total = hv + ca
+            if total > 0:
+                p._last_buy_total = total
         return p
 
 

@@ -975,3 +975,67 @@
   - `_load_inflections()` 반환 dict에 `"date": target` 추가 (KR/US 시장별 유효 날짜).
   - `index.html` 변곡점 테이블: `날짜` 헤더 컬럼 추가, 각 행에 `{{ r.date | dow_fmt }}` 표시.
   - KR 종목은 KR 거래일, US 종목은 US 거래일 기준으로 각자 정확한 날짜 표시.
+
+### decisions 테이블 — 백테스트 마지막 action 비교 컬럼 + 거래이력 링크
+
+- **배경** : decisions.csv의 오늘 action이 backtest 최근 신호와 다른 경우(stale 또는 데이터 불일치)를 직접 표시.
+- **수정** (`src/candle/dashboard/render.py`)
+  - `_load_last_backtest_actions(cfg)` 신규: `output/backtest/full/{type}/_all.csv` 에서 `mark_to_market` 제외 후 (ticker, type_name) → 마지막 buy/sell action을 dict로 반환.
+  - `_load_decisions()` : `last_bt_actions` 파라미터 추가. rule decisions의 각 row에 `last_bt_action` 필드 추가.
+  - `render()` : `_load_last_backtest_actions(cfg)` 호출 후 `_load_decisions()`에 전달.
+- **수정** (`src/candle/dashboard/templates/decisions.html`)
+  - Action 컬럼 색상 코딩: `last_bt_action != action` 이면 굵은 빨간색 + `← 직전: buy/sell` 표시.
+  - 거래이력 컬럼 신규: `📋 TICKER` → `ticker_trades.html#TICKER:type_name` 링크.
+  - 테이블 헤더에 "거래이력" 컬럼 추가.
+- **수정** (`src/candle/dashboard/templates/ticker_trades.html`)
+  - `#TICKER:type_name` URL hash 지원: `const [ticker, focusType]` 파싱.
+  - focusType 지정 시: `section-{tname}` id 기준 자동 펼침 + indigo ring + smooth scroll.
+
+### decisions 테이블 — enabled_types 기반 rule decisions 필터링
+
+- **배경** : `type1_1`처럼 `strategies.yml`의 `enabled_types`에서 제외된 type의 stale decisions rows가 decisions.csv에 남아 대시보드에 표시되던 문제.
+- **원인 분석** : `run.py`는 이미 `cfg.enabled_types`를 사용하지만 기존 decisions.csv의 과거 stale rows가 남아 있음.
+- **수정** (`src/candle/dashboard/render.py` `_load_decisions()`)
+  - `cfg.enabled_types`가 있으면 `enabled_set` 구성.
+  - `source.startswith("rule:")` 인 rows 중 `source[5:]`(type 이름)가 `enabled_set`에 없는 것은 today에서 제외.
+  - `ai`, `manual` source는 영향받지 않음.
+- **효과** : decisions.csv에 type1_1 stale rows가 남아 있어도 dashboard에 미표시. config에서 enabled_types 변경 시 즉시 반영.
+
+### decisions 테이블 — 직전 날짜 신호 비교로 교체 (prev_action)
+
+- **배경** : 기존 `_load_last_backtest_actions()` 방식은 backtest 마지막 action vs 오늘 simulate를 비교했으나, 정상 운영 시(매일 `make v2-all`) 둘 다 같은 데이터 기반이라 항상 일치 → 정보 가치 없음.
+- **사용자 제안** : decisions.csv 직전 날짜의 action과 비교해야 "오늘 신호가 바뀌었는지"를 알 수 있음.
+- **수정** (`src/candle/dashboard/render.py`)
+  - `_load_last_backtest_actions()` 함수 **삭제** (backtest _all.csv 기반 비교 제거).
+  - `_load_decisions()` 파라미터에서 `last_bt_actions` 제거.
+  - 내부에서 decisions.csv의 `actual_date` 직전 날짜(`prev_date`) 로우를 읽어 `(ticker, source) → action` 매핑 구성.
+  - 각 row에 `prev_action` (직전 날짜 같은 rule의 action), `signal_changed` (prev_action이 있고 오늘 action과 다를 때 True) 필드 추가.
+  - `render()` 호출부에서 `last_bt_actions` 로딩 코드 제거.
+- **수정** (`src/candle/dashboard/templates/decisions.html`)
+  - Action 컬럼 색상 로직 교체:
+    - `signal_changed=True` + `action=buy` → **빨간 굵은 글씨** + `← 직전: sell` (매수 전환, 액션 필요)
+    - `signal_changed=True` + `action=sell` → **파란 굵은 글씨** + `← 직전: buy` (매도 전환, 액션 필요)
+    - `signal_changed=False` → 일반 pill 표시. `prev_action` 있으면 회색 소자로 직전 action 표시.
+- **검증** : `actual_date=2026-05-15, 77건` 중 `signal_changed=1건` — `HSY rule:type1_2 prev=buy → today=sell` 정상 감지 확인.
+
+### backtest 거래 이력 — Buy-Sell 수익률(사이클별 수익률) 컬럼 추가
+
+- **배경** : 기존 `return_pct`(수익률)은 초기자본 대비 누적 수익률. 각 Buy→Sell 사이클별 개별 수익률을 별도 표시하는 요청.
+  - `return_pct` 예시: Cycle2 sell = −4.59% (초기 1000 기준 누적)
+  - `buy_sell_return_pct` 예시: Cycle2 = (954.12−987.75)/987.75 = −3.41% (해당 사이클만)
+- **계산 공식** : `buy_total = buy_row.holding_value + buy_row.cash`, `sell_total = sell_row.holding_value + sell_row.cash`, `return = (sell_total − buy_total) / buy_total × 100`
+- **수정** (`src/candle/backtest/base.py`)
+  - `TRADE_COLUMNS`에 `buy_sell_return_pct` 추가.
+  - `Portfolio.__post_init__()`: `self._last_buy_total: float | None = None` 초기화.
+  - `buy()`: 매수 직후 `self._last_buy_total = holding_value + cash` 기록.
+  - `sell()`: `sell_total = self.qty * price + self.cash` → `(sell_total − _last_buy_total) / _last_buy_total × 100` → `_record()` 전달. 전량 매도 후 `_last_buy_total = None` 리셋.
+  - `from_trades()` (증분 복원): 미결 buy 포지션이 있으면 마지막 buy 행의 `holding_value + cash` → `_last_buy_total` 복원.
+- **수정** (`src/candle/dashboard/render.py`)
+  - `_compute_buy_sell_returns(records)` 헬퍼 추가: buy-sell 쌍으로 in-place 계산 (기존 CSV 폴백).
+  - `_generate_trade_jsons()`: `buy_sell_return_pct` cols에 추가. CSV에 없으면 `_compute_buy_sell_returns()` 자동 호출.
+- **수정** (`src/candle/dashboard/templates/ticker_trades.html`)
+  - "현금" 컬럼 옆 "**Buy-Sell 수익률**" 컬럼 추가.
+  - sell 행에만 표시: **이익(+) = 빨간색 굵은 글씨**, **손실(−) = 파란색 굵은 글씨**. 나머지 행은 `—`.
+- **검증** : `HSY type1_2`
+  - Cycle1: buy_total=1000 → sell=987.75 → `−1.2245%` ✓
+  - Cycle2: buy_total=987.75 → sell=954.12 → `−3.4052%` ✓ (누적 −4.59%와 다름 — 정상)

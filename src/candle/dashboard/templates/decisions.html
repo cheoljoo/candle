@@ -271,6 +271,7 @@
             <th class="text-right px-3 py-2">Qty</th>
             <th class="text-right px-3 py-2">Price</th>
             <th class="text-left px-3 py-2">Reason</th>
+            <th class="text-left px-3 py-2">거래이력</th>
           </tr>
         </thead>
         <tbody>
@@ -297,11 +298,33 @@
               {% endif %}
             </td>
             <td class="px-3 py-2">
-              <span class="pill {{ d.action }}">{{ d.action }}</span>
+              {% if d.signal_changed %}
+                {% if d.action == "buy" %}
+                  {# 신호 변화: buy → 빨간 강조 #}
+                  <span class="font-bold text-red-700 text-sm">{{ d.action }}</span>
+                  <div class="text-xs text-red-500 leading-none mt-0.5">← 직전: {{ d.prev_action }}</div>
+                {% else %}
+                  {# 신호 변화: sell → 파란 강조 #}
+                  <span class="font-bold text-blue-700 text-sm">{{ d.action }}</span>
+                  <div class="text-xs text-blue-500 leading-none mt-0.5">← 직전: {{ d.prev_action }}</div>
+                {% endif %}
+              {% else %}
+                <span class="pill {{ d.action }}">{{ d.action }}</span>
+                {% if d.prev_action %}
+                  <div class="text-xs text-slate-400 leading-none mt-0.5">← {{ d.prev_action }}</div>
+                {% endif %}
+              {% endif %}
             </td>
             <td class="px-3 py-2 text-right tabular-nums">{{ d.qty if d.qty is not none else "—" }}</td>
             <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.2f}".format(d.price) if d.price is not none else "—" }}</td>
             <td class="px-3 py-2 text-slate-600">{{ d.reason }}</td>
+            <td class="px-3 py-2">
+              {% if d.source.startswith("rule:") %}
+                {% set type_name = d.source[5:] %}
+                <a href="ticker_trades.html#{{ d.ticker }}:{{ type_name }}"
+                   class="text-xs text-blue-600 hover:underline whitespace-nowrap">📋 {{ d.ticker }}</a>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>

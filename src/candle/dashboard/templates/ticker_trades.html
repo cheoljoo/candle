@@ -32,7 +32,11 @@
 (function () {
   const ENABLED_TYPES = new Set({{ enabled_types | tojson }});
 
-  const ticker = (window.location.hash || '').replace(/^#/, '') || new URLSearchParams(window.location.search).get('t') || '';
+  const rawHash = (window.location.hash || '').replace(/^#/, '') || new URLSearchParams(window.location.search).get('t') || '';
+  const colonIdx = rawHash.indexOf(':');
+  const ticker = colonIdx >= 0 ? rawHash.slice(0, colonIdx) : rawHash;
+  const focusType = colonIdx >= 0 ? rawHash.slice(colonIdx + 1) : null;
+
   if (!ticker) {
     document.getElementById('loading-msg').textContent = 'URL에 종목 코드가 없습니다. 예: ticker_trades.html#005930';
     return;
@@ -221,6 +225,11 @@
         const sideCls = t.side === 'buy' ? 'text-emerald-700 font-semibold' :
                         t.side === 'sell' ? 'text-rose-700 font-semibold' : 'text-slate-400 italic';
         const retCls = pctClass(t.return_pct);
+        // Buy-Sell 수익률: 이익=빨강, 손실=파랑
+        const bsRet = t.buy_sell_return_pct;
+        const bsRetCls = (t.side === 'sell' && bsRet != null)
+          ? (parseFloat(bsRet) >= 0 ? 'text-red-700 font-bold' : 'text-blue-700 font-bold')
+          : 'text-slate-300';
         return `<tr class="border-t hover:bg-slate-50">
           <td class="px-3 py-1.5 font-mono text-xs">${t.date}</td>
           <td class="px-3 py-1.5 text-xs ${sideCls}">${t.side}</td>
@@ -230,12 +239,13 @@
           <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.holding_qty)}</td>
           <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.holding_value)}</td>
           <td class="px-3 py-1.5 text-right tabular-nums text-xs">${t.cash != null ? fmtNum(t.cash) : '—'}</td>
+          <td class="px-3 py-1.5 text-right tabular-nums text-xs ${bsRetCls}">${(t.side === 'sell' && bsRet != null) ? fmtPct(bsRet) : '—'}</td>
           <td class="px-3 py-1.5 text-right tabular-nums text-xs ${retCls}">${t.return_pct != null ? fmtPct(t.return_pct) : '—'}</td>
         </tr>`;
       }).join('');
 
       const sectionHtml = `
-        <section class="bg-white rounded-lg shadow-sm p-4">
+        <section class="bg-white rounded-lg shadow-sm p-4" id="section-${tname}">
           <div class="flex items-center justify-between mb-2">
             <h2 class="text-sm font-semibold font-mono">${tname} — 거래 상세 (${trades.length}건)</h2>
             <button id="${btn_id}" onclick="toggleTable('${tbl_id}','${btn_id}')"
@@ -255,6 +265,7 @@
                   <th class="text-right px-3 py-2">보유수량</th>
                   <th class="text-right px-3 py-2">보유가치</th>
                   <th class="text-right px-3 py-2">현금</th>
+                  <th class="text-right px-3 py-2 text-rose-700">Buy-Sell 수익률</th>
                   <th class="text-right px-3 py-2">수익률</th>
                 </tr>
               </thead>
@@ -267,6 +278,22 @@
 
     const footer = `<p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>`;
     main.insertAdjacentHTML('beforeend', footer);
+
+    // focusType이 지정된 경우 해당 type 섹션 자동 펼침 + 스크롤
+    if (focusType && document.getElementById(`tbl-${focusType}`)) {
+      const tbl = document.getElementById(`tbl-${focusType}`);
+      const btn = document.getElementById(`btn-${focusType}`);
+      const sec = document.getElementById(`section-${focusType}`);
+      if (tbl && tbl.classList.contains('hidden')) {
+        tbl.classList.remove('hidden');
+        if (btn) btn.textContent = '접기 ▲';
+      }
+      // 섹션 강조 테두리
+      if (sec) {
+        sec.classList.add('ring-2', 'ring-indigo-400');
+        setTimeout(() => sec.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+      }
+    }
   }
 
   window.toggleTable = function(tblId, btnId) {
