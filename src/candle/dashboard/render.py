@@ -902,6 +902,44 @@ def _load_optimize_results(cfg: config.Config) -> dict[str, list[dict]]:
     return result
 
 
+def _load_ticker_prices(data_dir: Path, market: str, ticker: str,
+                        months: int = 12) -> dict:
+    """ticker daily CSV 에서 최근 N개월 종가·10월MA 반환.
+
+    Returns:
+        {"dates": [...], "closes": [...], "ma10m": [...]}
+        데이터 없으면 빈 dict 반환.
+    """
+    market_upper = market.upper()
+    if market_upper not in ("KR", "US"):
+        return {}
+    try:
+        daily_csv = paths.daily_csv(data_dir, market_upper, ticker)
+        df = csv_io.read(daily_csv)
+        if df.empty or "close" not in df.columns:
+            return {}
+        df = df.sort_values("date")
+        df["date"] = df["date"].astype(str)
+        # 최근 N개월 필터 (ISO date string 비교로 충분)
+        import datetime as _dt
+        cutoff = (_dt.date.today() - _dt.timedelta(days=months * 31)).isoformat()
+        df = df[df["date"] >= cutoff]
+        if df.empty:
+            return {}
+        ma_col = "ma10m" if "ma10m" in df.columns else None
+        result: dict = {
+            "dates": df["date"].tolist(),
+            "closes": [None if pd.isna(v) else round(float(v), 4) for v in df["close"]],
+            "ma10m": (
+                [None if pd.isna(v) else round(float(v), 4) for v in df[ma_col]]
+                if ma_col else []
+            ),
+        }
+        return result
+    except Exception:
+        return {}
+
+
 def _compute_buy_sell_returns(records: list[dict]) -> None:
     """buy-sell 쌍으로 buy_sell_return_pct 계산 (in-place).
 
@@ -966,6 +1004,7 @@ def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
                 "name": str(r.get("name", "")),
                 "group_name": str(r.get("group_name", "")),
                 "currency": str(r.get("currency", "")),
+                "market": str(r.get("market", "")),
             }
 
     # (type, ticker) → trades 리스트 수집
@@ -1010,13 +1049,15 @@ def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
     count = 0
     _step = max(1, min(100, total // 5))
     for tk, type_map in ticker_trades.items():
-        meta = inst_map.get(tk, {"name": tk, "group_name": "", "currency": ""})
+        meta = inst_map.get(tk, {"name": tk, "group_name": "", "currency": "", "market": ""})
+        prices_data = _load_ticker_prices(cfg.data_dir, meta.get("market", ""), tk)
         payload = {
             "ticker": tk,
             "name": meta["name"],
             "group_name": meta["group_name"],
             "currency": meta["currency"],
             "period": target_period,
+            "prices": prices_data,
             "types": type_map,
         }
         (trades_dir / f"{tk}.json").write_text(

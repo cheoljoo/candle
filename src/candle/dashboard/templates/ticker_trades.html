@@ -6,6 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>거래 이력 — Candle</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
   <style>
     body { font-family: ui-sans-serif, system-ui, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; }
   </style>
@@ -31,6 +32,9 @@
 <script>
 (function () {
   const ENABLED_TYPES = new Set({{ enabled_types | tojson }});
+  const TYPE_DESC = {{ type_descriptions | items | list | tojson }};
+  // TYPE_DESC: [[code, [short, detail]], ...]  →  Map for O(1) lookup
+  const TYPE_DESCRIPTIONS = new Map(TYPE_DESC.map(([k, v]) => [k, {short: v[0], detail: v[1]}]));
 
   const rawHash = (window.location.hash || '').replace(/^#/, '') || new URLSearchParams(window.location.search).get('t') || '';
   const colonIdx = rawHash.indexOf(':');
@@ -135,9 +139,9 @@
         <div class="flex items-center justify-between mb-2">
           <h2 class="text-sm font-semibold text-slate-700">📊 리스크 지표 설명 — MDD &amp; 승률 &amp; 평균 보유일</h2>
           <button onclick="this.closest('section').querySelector('.risk-body').classList.toggle('hidden');this.textContent=this.textContent.trim()==='접기'?'펼치기':'접기';"
-                  class="text-xs text-slate-400 hover:text-slate-600">접기</button>
+                  class="text-xs text-slate-400 hover:text-slate-600">펼치기</button>
         </div>
-        <div class="risk-body grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
+        <div class="risk-body hidden grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
           <div class="bg-amber-50 rounded p-3 border border-amber-100">
             <h3 class="font-semibold text-amber-700 mb-1">🟡 MDD — 최대 낙폭 (Max Drawdown)</h3>
             <p class="mb-2">백테스트 기간 중 <strong>고점 대비 최대로 떨어진 비율(%)</strong>입니다. 전략의 "최악의 순간"을 나타냅니다.</p>
@@ -217,10 +221,11 @@
       </section>`;
     main.insertAdjacentHTML('beforeend', summaryHtml);
 
-    // 전략별 상세 거래 테이블
+    // 전략별 상세 거래 테이블 + 차트
     for (const [tname, trades] of Object.entries(types)) {
       const btn_id = `btn-${tname}`;
       const tbl_id = `tbl-${tname}`;
+      const chart_id = `chart-${tname}`;
       const rows = trades.map(t => {
         const sideCls = t.side === 'buy' ? 'text-emerald-700 font-semibold' :
                         t.side === 'sell' ? 'text-rose-700 font-semibold' : 'text-slate-400 italic';
@@ -244,15 +249,29 @@
         </tr>`;
       }).join('');
 
+      const isOn = !ENABLED_TYPES.size || ENABLED_TYPES.has(tname);
+      const tdesc = TYPE_DESCRIPTIONS.get(tname);
+      const onOffBadge = ENABLED_TYPES.size
+        ? (isOn
+            ? '<span class="ml-2 text-xs px-1.5 py-0.5 bg-emerald-100 text-emerald-700 rounded">ON</span>'
+            : '<span class="ml-2 text-xs px-1.5 py-0.5 bg-slate-200 text-slate-400 rounded">OFF</span>')
+        : '';
+      const descHtml = tdesc
+        ? `<div class="mt-0.5 text-xs text-slate-500"><span class="font-medium text-slate-700">${tdesc.short}</span> — ${tdesc.detail}</div>`
+        : '';
       const sectionHtml = `
         <section class="bg-white rounded-lg shadow-sm p-4" id="section-${tname}">
           <div class="flex items-center justify-between mb-2">
-            <h2 class="text-sm font-semibold font-mono">${tname} — 거래 상세 (${trades.length}건)</h2>
+            <div>
+              <h2 class="text-sm font-semibold font-mono">${tname} — 거래 상세 (${trades.length}건)${onOffBadge}</h2>
+              ${descHtml}
+            </div>
             <button id="${btn_id}" onclick="toggleTable('${tbl_id}','${btn_id}')"
-                    class="text-xs px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600">
+                    class="text-xs px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600 flex-shrink-0 ml-4">
               펼치기 ▼
             </button>
           </div>
+          ${isOn ? `<div class="mb-3"><canvas id="${chart_id}" style="max-height:320px"></canvas></div>` : ''}
           <div id="${tbl_id}" class="hidden overflow-x-auto">
             <table class="min-w-full text-xs border-collapse">
               <thead class="bg-slate-100 text-slate-500">
@@ -274,6 +293,8 @@
           </div>
         </section>`;
       main.insertAdjacentHTML('beforeend', sectionHtml);
+      // 차트 빌드 (DOM 삽입 직후, ON 전략만)
+      if (isOn) buildTradeChart(chart_id, tname, trades, data.prices || {});
     }
 
     const footer = `<p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>`;
@@ -294,6 +315,176 @@
         setTimeout(() => sec.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
       }
     }
+  }
+
+  // ── 거래 이력 차트 ──────────────────────────────────────────────────
+  function buildTradeChart(canvasId, tname, trades, prices) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+
+    const pDates  = (prices.dates  || []);
+    const pCloses = (prices.closes || []);
+    const pMa10m  = (prices.ma10m  || []);
+
+    // 가격 데이터가 없으면 차트 숨김
+    if (!pDates.length) {
+      canvas.closest('.mb-3')?.remove();
+      return;
+    }
+
+    const dateSet = new Set(pDates);
+
+    // ── 보유수량 step-line ──────────────────────────────────────────
+    const sortedTrades = [...trades]
+      .filter(t => t.side === 'buy' || t.side === 'sell')
+      .sort((a, b) => a.date < b.date ? -1 : 1);
+
+    const holdingQtyArr = pDates.map(d => {
+      let qty = 0;
+      for (const t of sortedTrades) {
+        if (t.date <= d) qty = parseFloat(t.holding_qty) || 0;
+        else break;
+      }
+      return qty;
+    });
+
+    // ── 매수 / 매도 포인트 ─────────────────────────────────────────
+    const tradeByDate = {};
+    trades.forEach(t => {
+      if ((t.side === 'buy' || t.side === 'sell') && dateSet.has(t.date)) {
+        tradeByDate[t.date] = t;
+      }
+    });
+    const buyPrices  = pDates.map(d => (tradeByDate[d]?.side === 'buy'  ? parseFloat(tradeByDate[d].price) : null));
+    const sellPrices = pDates.map(d => (tradeByDate[d]?.side === 'sell' ? parseFloat(tradeByDate[d].price) : null));
+
+    // ── tooltip 추가 데이터 ────────────────────────────────────────
+    const tradeInfo = pDates.map(d => {
+      const t = tradeByDate[d];
+      if (!t) return null;
+      return {
+        side: t.side,
+        cash: t.cash != null ? fmtNum(t.cash) : '—',
+        qty:  t.holding_qty != null ? fmtNum(t.holding_qty) : '—',
+        bsr:  t.buy_sell_return_pct != null ? fmtPct(t.buy_sell_return_pct) : null,
+      };
+    });
+
+    new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: pDates,
+        datasets: [
+          {
+            label: '종가',
+            data: pCloses,
+            borderColor: 'rgb(71,85,105)',
+            backgroundColor: 'transparent',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0,
+            yAxisID: 'yPrice',
+            order: 3,
+          },
+          {
+            label: '10월 MA',
+            data: pMa10m.length ? pMa10m : null,
+            borderColor: 'rgb(234,88,12)',
+            backgroundColor: 'transparent',
+            borderWidth: 1.5,
+            borderDash: [5, 3],
+            pointRadius: 0,
+            tension: 0,
+            spanGaps: false,
+            yAxisID: 'yPrice',
+            order: 4,
+          },
+          {
+            label: '매수',
+            data: buyPrices,
+            borderColor: 'rgb(22,163,74)',
+            backgroundColor: 'rgb(22,163,74)',
+            pointStyle: 'triangle',
+            pointRadius: 8,
+            pointHoverRadius: 10,
+            showLine: false,
+            spanGaps: false,
+            yAxisID: 'yPrice',
+            order: 1,
+          },
+          {
+            label: '매도',
+            data: sellPrices,
+            borderColor: 'rgb(220,38,38)',
+            backgroundColor: 'rgb(220,38,38)',
+            pointStyle: 'triangle',
+            rotation: 180,
+            pointRadius: 8,
+            pointHoverRadius: 10,
+            showLine: false,
+            spanGaps: false,
+            yAxisID: 'yPrice',
+            order: 2,
+          },
+          {
+            label: '보유수량',
+            data: holdingQtyArr,
+            borderColor: 'rgba(34,197,94,0.6)',
+            backgroundColor: 'rgba(34,197,94,0.18)',
+            borderWidth: 1,
+            pointRadius: 0,
+            fill: true,
+            tension: 0,
+            stepped: 'before',
+            yAxisID: 'yQty',
+            order: 5,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label(ctx) {
+                const ds = ctx.dataset.label;
+                const v  = ctx.parsed.y;
+                if (v == null || isNaN(v)) return null;
+                const base = `${ds}: ${fmtNum(v)}`;
+                if (ds === '매수' || ds === '매도') {
+                  const info = tradeInfo[ctx.dataIndex];
+                  if (info) {
+                    const lines = [base, `  현금: ${info.cash}`, `  보유수량: ${info.qty}`];
+                    if (info.bsr) lines.push(`  Buy-Sell 수익률: ${info.bsr}`);
+                    return lines;
+                  }
+                }
+                return base;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { maxTicksLimit: 8, font: { size: 10 }, maxRotation: 0 },
+            grid: { display: false },
+          },
+          yPrice: {
+            position: 'left',
+            ticks: { font: { size: 10 }, maxTicksLimit: 6 },
+            title: { display: true, text: '가격', font: { size: 10 } },
+          },
+          yQty: {
+            position: 'right',
+            ticks: { font: { size: 10 }, maxTicksLimit: 4 },
+            title: { display: true, text: '보유수량', font: { size: 10 } },
+            grid: { drawOnChartArea: false },
+          },
+        },
+      },
+    });
   }
 
   window.toggleTable = function(tblId, btnId) {

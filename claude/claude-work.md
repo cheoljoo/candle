@@ -1039,3 +1039,28 @@
 - **검증** : `HSY type1_2`
   - Cycle1: buy_total=1000 → sell=987.75 → `−1.2245%` ✓
   - Cycle2: buy_total=987.75 → sell=954.12 → `−3.4052%` ✓ (누적 −4.59%와 다름 — 정상)
+
+### 거래 이력 차트 — Chart.js 종가·10월MA·매수/매도 마커·보유수량
+
+- **사용자 요청** : 거래 이력 상세 페이지 각 type별 차트 추가 (종가, 10월이평선, 매수/매도 시점, 보유수량).
+- **데이터 준비** (`src/candle/dashboard/render.py`)
+  - `inst_map`에 `market` 필드 추가 (`instruments.csv` → `row["market"]`).
+  - `_load_ticker_prices(data_dir, market, ticker, months=12)` 헬퍼 신규:
+    - `data/daily/{KR|US}/{ticker}.csv`에서 최근 12개월 데이터 로드.
+    - 반환: `{dates: [...], closes: [...], ma10m: [...]}`
+    - 데이터 없거나 예외 시 빈 dict 반환.
+  - `_generate_trade_jsons()` payload에 `prices` 키 추가: `prices_data = _load_ticker_prices(...)`.
+- **Chart.js CDN 추가** (`templates/ticker_trades.html` `<head>`)
+  - `chart.js@4.4.4` CDN script 추가.
+- **`buildTradeChart()` 함수 신규** (`templates/ticker_trades.html`)
+  - 5개 dataset: 종가(slate line), 10월MA(orange dash), 매수(green triangle↑), 매도(red triangle↓, rotation=180), 보유수량(green step-fill, right y-axis).
+  - `tradeByDate` 맵으로 prices window 내 거래만 마커 표시.
+  - tooltip: 매수 행 → `현금, 보유수량`; 매도 행 → `현금, Buy-Sell 수익률`.
+  - 가격 데이터 없으면 canvas 자동 제거.
+- **섹션 HTML 수정**: 각 type 섹션에 `<canvas id="chart-{tname}">` 추가.
+- **ON 전략만 차트 표시** : `isOn = !ENABLED_TYPES.size || ENABLED_TYPES.has(tname)` — OFF 전략은 canvas 미삽입 + `buildTradeChart()` 미호출.
+- **전략 설명 표시** : `TYPE_DESCRIPTIONS` JS Map (Jinja2 `type_descriptions | items`) 주입.
+  - 각 섹션 헤더에 `short — detail` 설명 라인 + ON/OFF 뱃지 표시.
+- **차트 구간 1년** : `_load_ticker_prices` 기본값 `months=6` → `months=12` 변경.
+- **리스크 지표 설명 섹션 기본 접힘** : `risk-body` div에 `hidden` 클래스 추가, 버튼 텍스트 `접기` → `펼치기`.
+- **검증** : `make v2-dashboard` 정상 완료. `dashboard_site/data/trades/000100.json`의 `prices.dates` 248개(1년치) 확인.

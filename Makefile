@@ -4,7 +4,7 @@ SHELL := /bin/bash
 # debug 켜기:    make <target> DEBUG=--debug
 # 메일 발송 켜기: make <target> SENDMAIL=YES
 DEBUG    ?=
-SENDMAIL ?= 
+SENDMAIL ?= YES
 
 
 .PHONY: fetch analyze backtest-type1 backtest-type1-2020-2025 backtest-type1-2025-now \
