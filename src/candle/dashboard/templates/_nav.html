@@ -13,3 +13,75 @@
     <a href="history.html" class="px-3 py-1 rounded hover:bg-slate-100 text-slate-600">이력</a>
   </div>
 </nav>
+<script>
+/* ── Shared table sort utility ─────────────────────────────────────────────
+   Usage: add  data-sortable  attribute to any <table>.
+   All <th> in its last <thead> row become clickable sort toggles.
+   For dynamically-built tables call  window.initSortableTable(tableEl)
+   after inserting rows.
+────────────────────────────────────────────────────────────────────────── */
+(function () {
+  function cellText(cell) {
+    return cell ? cell.textContent.trim() : '';
+  }
+  function parseVal(text) {
+    // Strip formatting chars, try numeric parse
+    var n = parseFloat(text.replace(/[,+%원일]/g, ''));
+    return isNaN(n) ? null : n;
+  }
+  function sortTableBody(table, colIdx, dir) {
+    var tbody = table.tBodies[0];
+    if (!tbody) return;
+    var rows = Array.from(tbody.rows);
+    rows.sort(function (a, b) {
+      var at = cellText(a.cells[colIdx]);
+      var bt = cellText(b.cells[colIdx]);
+      var av = parseVal(at);
+      var bv = parseVal(bt);
+      if (av !== null && bv !== null) return dir * (av - bv);
+      return dir * at.localeCompare(bt, 'ko');
+    });
+    rows.forEach(function (r) { tbody.appendChild(r); });
+  }
+  function updateIcons(ths, activeIdx, dir) {
+    ths.forEach(function (th, i) {
+      var icon = th.querySelector('.tbl-sort-icon');
+      if (icon) icon.textContent = i === activeIdx ? (dir === -1 ? ' ↓' : ' ↑') : ' ⇕';
+    });
+  }
+  function initSortableTable(table) {
+    if (table._sortInit) return;
+    table._sortInit = true;
+    var thead = table.tHead;
+    if (!thead) return;
+    var headerRow = thead.rows[thead.rows.length - 1];
+    if (!headerRow) return;
+    var ths = Array.from(headerRow.cells);
+    var state = { col: -1, dir: -1 };
+    ths.forEach(function (th, i) {
+      var icon = document.createElement('span');
+      icon.className = 'tbl-sort-icon text-slate-400 text-xs select-none';
+      icon.textContent = ' ⇕';
+      th.appendChild(icon);
+      th.style.cursor = 'pointer';
+      th.classList.add('hover:bg-slate-200', 'select-none');
+      th.addEventListener('click', function () {
+        if (state.col === i) { state.dir *= -1; }
+        else { state.col = i; state.dir = -1; }
+        sortTableBody(table, i, state.dir);
+        updateIcons(ths, state.col, state.dir);
+      });
+    });
+  }
+  function initAll() {
+    document.querySelectorAll('table[data-sortable]').forEach(initSortableTable);
+  }
+  window.initSortableTable = initSortableTable;
+  window.initAllSortableTables = initAll;
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAll);
+  } else {
+    initAll();
+  }
+})();
+</script>

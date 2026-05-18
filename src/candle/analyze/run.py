@@ -171,19 +171,22 @@ def run(cfg: config.Config, market: str, today: date,
         n_context = new_start - ctx_start
         new_comp  = computed.iloc[n_context:].reset_index(drop=True)
 
+        # ma10m_updown / inflection 은 문자열 컬럼 — 신규 컬럼 추가 시
+        # pandas 가 float64 로 초기화하더라도 float 변환을 시도하지 않도록 명시
+        _STRING_COLS = {"ma10m_updown", "inflection"}
+
         out = df.copy()
         for col in ["ma10d", "ma50d", "ma10m", "ma10m_updown", "inflection"]:
             if col not in out.columns:
                 out[col] = pd.NA
             if col in new_comp.columns:
                 col_idx = out.columns.get_loc(col)
-                col_dtype = out.dtypes.iloc[col_idx]
-                if pd.api.types.is_float_dtype(col_dtype):
-                    # float 컬럼: pd.NA → np.nan 으로 변환해 dtype 불일치 경고 방지
-                    vals: np.ndarray = new_comp[col].to_numpy(dtype=float, na_value=np.nan)
-                else:
+                if col in _STRING_COLS:
                     # object/string 컬럼: 그대로 object array
-                    vals = new_comp[col].to_numpy(dtype=object)
+                    vals: np.ndarray = new_comp[col].to_numpy(dtype=object)
+                else:
+                    # float 컬럼: pd.NA → np.nan 으로 변환해 dtype 불일치 경고 방지
+                    vals = new_comp[col].to_numpy(dtype=float, na_value=np.nan)
                 out.iloc[new_start:new_start + n_new, col_idx] = vals
 
         # ── rank merge (새 날짜만) ────────────────────────────────────

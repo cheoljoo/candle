@@ -179,7 +179,19 @@ def run(cfg: config.Config, type_names: Iterable[str],
 
     strategy_rows = _strategy_summary(cfg, summary_df, trades_df, risk_map)
     strategy_csv = pd.DataFrame(strategy_rows)
-    csv_io.atomic_write(strategy_csv, out_dir / "strategy_summary.csv")
+
+    # 기존 파일이 있으면 다른 통화(시장)의 행을 보존 (KR 실행 시 USD 행 유지, 반대도 동일)
+    _summary_path = out_dir / "strategy_summary.csv"
+    if _summary_path.exists() and "currency" in strategy_csv.columns:
+        _new_currencies = set(strategy_csv["currency"].unique())
+        _existing = csv_io.read(_summary_path)
+        if not _existing.empty and "currency" in _existing.columns:
+            _other = _existing[~_existing["currency"].isin(_new_currencies)]
+            if not _other.empty:
+                strategy_csv = pd.concat([_other, strategy_csv], ignore_index=True)
+                tprint(f"[compare] 기존 {len(_other)}행(타 시장) 보존 후 병합", flush=True)
+
+    csv_io.atomic_write(strategy_csv, _summary_path)
     _print_strategy(strategy_csv)
     tprint(f"[compare] step 1/4 완료 — elapsed={time.perf_counter()-_step_t0:.1f}s", flush=True)
 

@@ -116,7 +116,7 @@
         </button>
       </div>
       <div class="overflow-x-auto">
-        <table id="cmp-tbl-{{ loop.index }}" class="min-w-full text-sm">
+        <table id="cmp-tbl-{{ loop.index }}" class="min-w-full text-sm" data-sortable>
           <thead class="bg-slate-100 text-slate-600 text-xs">
             <tr>
               <th class="text-left px-3 py-2">전략</th>
@@ -143,9 +143,7 @@
             <tr class="border-t
               {% if is_total %}bg-slate-50 font-semibold{% endif %}
               {% if strategy_changed and not loop.first %}border-t-2 border-slate-300{% endif %}">
-              <td class="px-3 py-2 font-medium">
-                {% if strategy_changed %}{{ r.strategy }}{% endif %}
-              </td>
+              <td class="px-3 py-2 font-medium">{{ r.strategy }}</td>
               <td class="px-3 py-2
                 {% if is_total %}text-slate-500 italic{% endif %}">
                 {{ grp_val }}

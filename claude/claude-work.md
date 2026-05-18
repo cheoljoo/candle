@@ -1065,6 +1065,47 @@
 - **리스크 지표 설명 섹션 기본 접힘** : `risk-body` div에 `hidden` 클래스 추가, 버튼 텍스트 `접기` → `펼치기`.
 - **검증** : `make v2-dashboard` 정상 완료. `dashboard_site/data/trades/000100.json`의 `prices.dates` 248개(1년치) 확인.
 
+---
+
+## 2026-05-18
+
+### analyze 버그 수정 — `ValueError: could not convert string to float: '-'`
+
+- **증상** : `candle analyze --market kr` 실행 시 `ValueError: could not convert string to float: '-'` 발생. `analyze/run.py:183` 의 `out.iloc[...] = vals` 에서 object → float 강제 변환 실패.
+- **원인** : `out[col] = pd.NA` 로 신규 컬럼 초기화 시 pandas 가 해당 컬럼 dtype 을 `float64` 로 설정. 이후 `is_float_dtype(col_dtype)` 체크가 True 가 되어 문자열 컬럼(`ma10m_updown`, `inflection`)에도 `to_numpy(dtype=float)` 를 시도.
+- **수정** : dtype 검사 대신 `_STRING_COLS = {"ma10m_updown", "inflection"}` 하드코딩 set 으로 판별. set 에 있으면 `to_numpy(dtype=object)`, 나머지는 `to_numpy(dtype=float, na_value=np.nan)`.
+
+### 대시보드 테이블 정렬 기능 추가 — 공유 JS 유틸리티 (data-sortable)
+
+- **사용자 요청** : 모든 대시보드 페이지 테이블에 컬럼 헤더 클릭 시 오름차순/내림차순 정렬 기능 추가.
+- **수정**
+  - `src/candle/dashboard/templates/_nav.html` 에 공유 JS 정렬 유틸리티 추가 (모든 템플릿이 `{% include "_nav.html" %}` 사용).
+    - `cellText()`, `parseVal()` (숫자/문자열 자동 판별), `sortTableBody()`, `updateIcons()` (⇕/↑/↓), `initSortableTable()`, `initAll()` 함수.
+    - `window.initSortableTable`, `window.initAllSortableTables` 노출.
+    - `data-sortable` 속성이 있는 `<table>` 에 자동 초기화 (DOMContentLoaded 또는 즉시).
+  - 7개 템플릿에 `data-sortable` 추가: `compare.html`(기간 탭별 4개), `decisions.html`, `group_returns.html`, `history.html`, `index.html`, `market_signals.html`(4개), `ticker_trades.html`(JS 생성 테이블 포함).
+  - `ticker_trades.html` : JS `renderTrades()` 완료 후 `initAllSortableTables()` 호출.
+
+### compare 전략별 요약 — 정렬 후 전략명 빈칸 수정
+
+- **증상** : 승률 컬럼 클릭으로 정렬 시 전략 컬럼이 빈칸으로 보임.
+- **원인** : Jinja2 템플릿에서 `strategy_changed` 시에만 전략명 출력 → 각 전략 그룹의 첫 행에만 전략명, 나머지는 빈 문자열. 클라이언트 정렬 후 행이 섞여도 HTML 셀 값은 고정.
+- **수정** : `compare.html` 전략 컬럼 `{% if strategy_changed %}{{ r.strategy }}{% endif %}` → `{{ r.strategy }}` 로 변경. 모든 행에 전략명 항상 표시.
+
+### compare 전략 요약 CSV — KR/US 병합 저장
+
+- **증상** : `v2-all-kr` 실행 후 대시보드 전략별 요약에 ETF_KR/KOSPI200 만 표시; SP500/ETF_US 누락. `v2-all-us` 실행 시 반대.
+- **원인** : `compare/run.py` 에서 `strategy_summary.csv` 를 항상 새 데이터로 덮어씀. KR 실행 시 USD 행(SP500, ETF_US) 소실, US 실행 시 KRW 행 소실.
+- **수정** : `strategy_summary.csv` 저장 직전, 기존 파일이 있으면 `currency` 컬럼 기준으로 현재 실행에 없는 통화의 행을 보존 후 병합 저장.
+  - KR 실행(`currency=KRW`): 기존 USD 행 보존, KRW 행만 교체.
+  - US 실행(`currency=USD`): 기존 KRW 행 보존, USD 행만 교체.
+  - 최초 실행(파일 없음): 기존 로직과 동일.
+  - **주의**: 최초에는 `v2-backtest-kr` / `v2-backtest-us` 양쪽을 1회씩 실행해야 4개 그룹 모두 표시됨. 이후부터는 각각 따로 실행해도 데이터 유지.
+
+---
+
+## 2026-05-17
+
 ### backtest 기간 설정 config화 — config/periods.yml + candle backtest-all
 
 - **배경** : Makefile에 `2000-2015`, `2010-2020`, `5y`, `full` 4개 기간이 하드코딩되어 있어 기간 추가 시 Makefile 직접 수정이 필요했던 문제.

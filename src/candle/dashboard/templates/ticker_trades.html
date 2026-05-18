@@ -182,7 +182,7 @@
       <section class="bg-white rounded-lg shadow-sm p-4">
         <h2 class="text-base font-semibold mb-3">전략별 요약</h2>
         <div class="overflow-x-auto">
-          <table class="min-w-full text-sm">
+          <table class="min-w-full text-sm" data-sortable>
             <thead class="bg-slate-100 text-slate-600 text-xs">
               <tr>
                 <th class="text-left px-3 py-2">전략</th>
@@ -273,7 +273,7 @@
           </div>
           ${isOn ? `<div class="mb-3"><canvas id="${chart_id}" style="max-height:320px"></canvas></div>` : ''}
           <div id="${tbl_id}" class="hidden overflow-x-auto">
-            <table class="min-w-full text-xs border-collapse">
+            <table class="min-w-full text-xs border-collapse" data-sortable>
               <thead class="bg-slate-100 text-slate-500">
                 <tr>
                   <th class="text-left px-3 py-2">날짜</th>
@@ -299,6 +299,9 @@
 
     const footer = `<p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>`;
     main.insertAdjacentHTML('beforeend', footer);
+
+    // 정렬 가능 테이블 초기화 (동적 DOM 삽입 후)
+    if (window.initAllSortableTables) window.initAllSortableTables();
 
     // focusType이 지정된 경우 해당 type 섹션 자동 펼침 + 스크롤
     if (focusType && document.getElementById(`tbl-${focusType}`)) {
