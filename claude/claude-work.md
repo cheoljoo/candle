@@ -1135,3 +1135,54 @@
   - `v2-backtest-us` → `uv run candle backtest-all --market us`
   - 기존 `v2-backtest-compare-{label}` 개별 타겟은 수동 단일 실행용으로 유지.
 - **검증** : `uv run candle backtest-all --help` 정상. workers 동작 확인(`market=all` 시 `effective workers=4`).
+
+---
+
+## 2026-05-19
+
+### compare instruments.csv 미등록 ticker 필터링 (UNKNOWN 그룹 제거)
+
+- **증상** : compare 전략별 요약 및 상위 10% 섹션에 `UNKNOWN` 그룹이 나타남.
+- **원인** : `instruments.csv`가 업데이트되면서 기존 백테스트에서 사용한 일부 ticker(예: 삼성전자우, 맥쿼리인프라, SK가스 등 편출 종목)가 신규 instruments.csv에서 제외. 이들이 group_name을 찾지 못해 UNKNOWN으로 분류.
+- **수정** (`src/candle/compare/run.py`)
+  - `run()` 진입부에서 `instruments.csv` 로드 후 `ticker` set 구성.
+  - `summary_df`를 해당 set에 있는 ticker만 필터링 (`_valid_tickers`).
+  - 제외된 건수 tprint 출력.
+- **검증** : 2000-2015 기간에서 22개 ticker 제외 → UNKNOWN 그룹 사라짐.
+
+### compare 상위 10% 섹션 전면 개편
+
+- **배경** : 기존 팝업 패널 방식 → 각 전략 행 클릭 시 토글. 분모도 비영리 수익률 종목만 사용(valid_df).
+- **수정** (`src/candle/dashboard/render.py` `_load_compare_top10`)
+  - 반환 구조: `{period: {type_col: {group_name: {group_size, top_n, tickers}}}}`
+  - 분모: `len(grp_df)` (그룹 전체 종목 수, 비영리 필터 제거)
+  - NaN 포함 전체 정렬 후 상위 10% 추출.
+- **수정** (`src/candle/dashboard/templates/compare.html`)
+  - 기존 팝업/CMP_TOP10 JS 변수 완전 제거.
+  - 독립 `<section>` 으로 분리.
+  - **2단계 탭**: 1단계=기간 탭(border-b 스타일) / 2단계=전략 탭(pill 스타일, Alpine.js nested x-data).
+  - **2×2 그리드 레이아웃**: 행1=(ETF_KR|ETF_US, amber 헤더) / 행2=(KOSPI200|SP500, sky 헤더, max-h-96 스크롤+sticky thead).
+  - 각 종목에 거래이력 버튼 (ticker_trades.html#TICKER:type_col 링크).
+
+### compare 상위 10% 테이블 — 매수/매도/보유일/RANK 컬럼 추가
+
+- **배경** : 상위 10% 표에 수익률 외 추가 지표 요구.
+- **수정** (`src/candle/dashboard/render.py` `_load_compare_top10`)
+  - `output/backtest/{period}/{type_col}/_summary.csv` 로드 → `bt_buy_sell` dict: `{type_name: {ticker: (buy_count, sell_count)}}`.
+  - `output/compare/{period}/best_strategy.csv` 로드 → `rank_by_ticker` dict: `{ticker: 최고전략_매수일_시총순위}`.
+  - 각 ticker dict에 `buy_count`, `sell_count`, `avg_hold_days`, `market_rank` 추가.
+- **수정** (`src/candle/dashboard/templates/compare.html`)
+  - ETF / KOSPI200·SP500 두 블록 모두 thead에 `매수`, `매도`, `보유일`, `RANK` 컬럼 추가.
+  - None/0 fallback은 `—` 표시.
+
+### 거래 이력 차트 — equity 라인(평가액+현금) + 축 색상 적용
+
+- **사용자 요청** : 보유수량×종가+현금 equity 라인 표시 + 차트 축별 색상 구분.
+- **수정** (`src/candle/dashboard/templates/ticker_trades.html`)
+  - `cashArr`: trades의 마지막 cash 값을 날짜별로 forward-fill.
+  - `equityArr`: `holdingQty × close + cash` (cash null이면 null).
+  - 새 dataset `평가액+현금`: `borderColor=rgb(99,102,241)`, `yAxisID='yEquity'`, `order=6`.
+  - tooltip: 매수/매도 마커에 `평가액+현금` 값 표시.
+  - `yPrice` 축: 라벨 색 `rgb(71,85,105)` (slate).
+  - `yQty` 축: `display: false` → **`true`**, 색 `rgba(34,197,94,0.85)` (green), 제목 '보유수량'.
+  - `yEquity` 축: 색 `rgb(99,102,241)` (indigo), 제목 '평가액+현금'.

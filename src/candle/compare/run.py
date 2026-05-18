@@ -169,6 +169,16 @@ def run(cfg: config.Config, type_names: Iterable[str],
     summary_df = pd.concat(summaries, ignore_index=True)
     trades_df = pd.concat(trade_frames, ignore_index=True) if trade_frames else pd.DataFrame()
 
+    # instruments.csv 에 없는 ticker 제외 — UNKNOWN 원천 차단
+    _inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+    if not _inst.empty:
+        _valid_tickers = set(_inst["ticker"].astype(str))
+        _before = len(summary_df)
+        summary_df = summary_df[summary_df["ticker"].astype(str).isin(_valid_tickers)].copy()
+        _excluded = _before - len(summary_df)
+        if _excluded > 0:
+            tprint(f"[compare] instruments.csv 미등록 ticker {_excluded}개 제외", flush=True)
+
     # 1) 전략 단위 (currency별로 합산: KRW/USD 분리)
     tprint("[compare] step 1/4 strategy_summary 계산 중...", flush=True)
     if debug:
@@ -191,6 +201,13 @@ def run(cfg: config.Config, type_names: Iterable[str],
                 strategy_csv = pd.concat([_other, strategy_csv], ignore_index=True)
                 tprint(f"[compare] 기존 {len(_other)}행(타 시장) 보존 후 병합", flush=True)
 
+    # 병합 후 정렬 복원: strategy → TOTAL 마지막 → currency → group
+    if not strategy_csv.empty and "group" in strategy_csv.columns:
+        strategy_csv["_is_total"] = strategy_csv["group"].str.startswith("TOTAL").astype(int)
+        strategy_csv = strategy_csv.sort_values(
+            ["strategy", "currency", "_is_total", "group"]
+        ).drop(columns=["_is_total"]).reset_index(drop=True)
+
     csv_io.atomic_write(strategy_csv, _summary_path)
     _print_strategy(strategy_csv)
     tprint(f"[compare] step 1/4 완료 — elapsed={time.perf_counter()-_step_t0:.1f}s", flush=True)
@@ -201,7 +218,19 @@ def run(cfg: config.Config, type_names: Iterable[str],
         print("[compare][debug] step 2/4 per_ticker", flush=True)
     _step_t0 = time.perf_counter()
     pt = _per_ticker(summary_df, risk_map)
-    csv_io.atomic_write(pt, out_dir / "per_ticker.csv")
+
+    # 기존 파일이 있으면 다른 통화(시장)의 행을 보존 (KR 실행 시 USD 행 유지, 반대도 동일)
+    _pt_path = out_dir / "per_ticker.csv"
+    if _pt_path.exists() and "currency" in pt.columns:
+        _new_currencies = set(pt["currency"].unique())
+        _existing_pt = csv_io.read(_pt_path)
+        if not _existing_pt.empty and "currency" in _existing_pt.columns:
+            _other_pt = _existing_pt[~_existing_pt["currency"].isin(_new_currencies)]
+            if not _other_pt.empty:
+                pt = pd.concat([_other_pt, pt], ignore_index=True)
+                tprint(f"[compare] per_ticker 기존 {len(_other_pt)}행(타 시장) 보존 후 병합", flush=True)
+
+    csv_io.atomic_write(pt, _pt_path)
     tprint(f"[compare] step 2/4 완료 — elapsed={time.perf_counter()-_step_t0:.1f}s", flush=True)
 
     # 3) 종목별 최고전략 + 최고전략 매수일 시총순위
@@ -251,7 +280,7 @@ def _strategy_summary(cfg: config.Config, summary_df: pd.DataFrame,
         for _, r in inst.iterrows():
             ticker_group[str(r["ticker"])] = str(r["group_name"])
 
-    # summary_df 에 group_name 추가
+    # summary_df 에 group_name 추가 (run() 레벨에서 이미 필터링됨 → UNKNOWN 없음)
     df = summary_df.copy()
     df["group_name"] = df["ticker"].astype(str).map(ticker_group).fillna("UNKNOWN")
 

@@ -1,13 +1,13 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-18 (15차)
+date: 2026-05-19 (16차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-18 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(KR+US) 대시보드 추가. Makefile KR/US 분리 파이프라인. 리스크 지표(MDD·승률·평균보유일) + 거래 이력 상세 페이지 + 미국 시장 시그널(VIX·수익률 곡선) + KOSPI200 외국인/기관 매매 추가. Worker CPU×1/2 기본값. enabled_types ON/OFF 뱃지. market calendar 수집. decisions 신호 확인일(마지막 거래일) 표시. ticker str 강제화. market_calendar 기반 비거래일 decisions 검증 가드. 변곡점 테이블 날짜 컬럼 추가. decisions 백테스트 action 비교 컬럼 + enabled_types 필터. decisions 직전날짜 prev_action 비교(신호변화 감지, buy=빨강/sell=파랑). 거래이력 #TICKER:type_name URL hash 지원. backtest Buy-Sell 수익률(사이클별 수익률) 컬럼 추가 — ticker_trades.html 이익=빨강/손실=파랑. 거래이력 Chart.js 차트(종가·10월MA·매수↑/매도↓마커·보유수량) + 전략 설명·ON/OFF 뱃지 + 1년 구간 + ON 전략만 차트 표시. backtest 기간 config화(config/periods.yml) + candle backtest-all 커맨드(병렬 ProcessPoolExecutor, workers 설정 3단계 우선순위). analyze ValueError 버그 수정(_STRING_COLS 하드코딩). 대시보드 테이블 전체 컬럼 정렬(data-sortable + _nav.html 공유 JS). compare 전략명 항상 표시 + strategy_summary.csv KR/US 병합 저장.**
+> **2026-05-19 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(KR+US) 대시보드 추가. Makefile KR/US 분리 파이프라인. 리스크 지표(MDD·승률·평균보유일) + 거래 이력 상세 페이지 + 미국 시장 시그널(VIX·수익률 곡선) + KOSPI200 외국인/기관 매매 추가. Worker CPU×1/2 기본값. enabled_types ON/OFF 뱃지. market calendar 수집. decisions 신호 확인일(마지막 거래일) 표시. ticker str 강제화. market_calendar 기반 비거래일 decisions 검증 가드. 변곡점 테이블 날짜 컬럼 추가. decisions 백테스트 action 비교 컬럼 + enabled_types 필터. decisions 직전날짜 prev_action 비교(신호변화 감지, buy=빨강/sell=파랑). 거래이력 #TICKER:type_name URL hash 지원. backtest Buy-Sell 수익률(사이클별 수익률) 컬럼 추가 — ticker_trades.html 이익=빨강/손실=파랑. 거래이력 Chart.js 차트(종가·10월MA·매수↑/매도↓마커·보유수량) + 전략 설명·ON/OFF 뱃지 + 1년 구간 + ON 전략만 차트 표시. backtest 기간 config화(config/periods.yml) + candle backtest-all 커맨드(병렬 ProcessPoolExecutor, workers 설정 3단계 우선순위). analyze ValueError 버그 수정(_STRING_COLS 하드코딩). 대시보드 테이블 전체 컬럼 정렬(data-sortable + _nav.html 공유 JS). compare 전략명 항상 표시 + strategy_summary.csv KR/US 병합 저장. instruments.csv 미등록 ticker 필터링(UNKNOWN 그룹 제거). compare 상위 10% 섹션 전면 개편(2단 탭 기간×전략 + 2×2 그룹 그리드 + 매수/매도/보유일/RANK 컬럼). 거래이력 차트 평가액+현금(주식수×종가+현금) equity 라인 추가 + 차트 축 색상(yPrice=slate/yQty=green/yEquity=indigo).**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 

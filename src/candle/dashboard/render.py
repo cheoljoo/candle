@@ -55,6 +55,11 @@ def render(cfg: config.Config, on_date: date,
     compare_period_list = list(compare_all.keys())
     tprint(f"[dashboard] compare 완료 — {len(compare_period_list)}개 period ({time.perf_counter()-t0:.1f}s)", flush=True)
 
+    tprint("[dashboard] compare top-10% 종목 계산...", flush=True)
+    t0 = time.perf_counter()
+    compare_top10 = _load_compare_top10(cfg)
+    tprint(f"[dashboard] compare top-10% 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
     _first_rows = next(iter(compare_all.values()), []) if compare_all else []
     best_strategy = (
         max(_first_rows, key=lambda r: r["수익률"])["strategy"]
@@ -213,6 +218,7 @@ def render(cfg: config.Config, on_date: date,
         },
         compare_all=compare_all,
         compare_period_list=compare_period_list,
+        compare_top10=compare_top10,
         decisions=decisions,
         counts=counts,
         type_counts=type_counts,
@@ -366,6 +372,10 @@ def _load_compare_all(cfg: config.Config) -> dict[str, list[dict]]:
         p = paths.compare_dir(cfg.output_dir, label) / "strategy_summary.csv"
         df = csv_io.read(p)
         if not df.empty:
+            # 정렬 보장: strategy → TOTAL 마지막 → currency → group
+            if "group" in df.columns:
+                df["_is_total"] = df["group"].str.startswith("TOTAL").astype(int)
+                df = df.sort_values(["strategy", "currency", "_is_total", "group"]).drop(columns=["_is_total"]).reset_index(drop=True)
             result[label] = df.fillna(0).to_dict(orient="records")
 
     # flat (label 없음) 도 포함
@@ -374,6 +384,113 @@ def _load_compare_all(cfg: config.Config) -> dict[str, list[dict]]:
         df = csv_io.read(flat_p)
         if not df.empty:
             result["(기본)"] = df.fillna(0).to_dict(orient="records")
+
+    return result
+
+
+def _load_compare_top10(cfg: config.Config) -> dict:
+    """period → { type_col → { group_name → { group_size, top_n, tickers } } }
+
+    per_ticker.csv 의 각 type 컬럼을 이용해 그룹별 상위 10% 종목을 계산해 반환한다.
+    분모는 해당 (type, group) 의 전체 종목 수이고 0 수익률 종목도 포함해 정렬한다.
+    각 종목에 매수/매도 횟수, 평균 보유일, 시가총액 순위도 포함한다.
+    """
+    import math
+
+    inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+    ticker_group: dict[str, str] = {}
+    if not inst.empty:
+        for _, r in inst.iterrows():
+            ticker_group[str(r["ticker"])] = str(r.get("group_name", "UNKNOWN"))
+
+    _FIXED_COLS = {"ticker", "name", "currency", "avg_return", "avg_mdd", "avg_win_rate",
+                   "avg_hold_days", "group_name"}
+
+    result: dict = {}
+
+    for label in paths.list_compare_periods(cfg.output_dir):
+        pt_path = paths.compare_dir(cfg.output_dir, label) / "per_ticker.csv"
+        pt_df = csv_io.read(pt_path)
+        if pt_df.empty:
+            continue
+
+        pt_df = pt_df.copy()
+        pt_df["group_name"] = pt_df["ticker"].astype(str).map(ticker_group).fillna("UNKNOWN")
+        type_cols = [c for c in pt_df.columns if c not in _FIXED_COLS]
+
+        # ── 백테스트 _summary.csv 에서 type별 buy/sell 카운트 로드 ───────────
+        bt_dir = paths.backtest_root(cfg.output_dir, label)
+        # { type_name → { ticker → (buy_count, sell_count) } }
+        bt_buy_sell: dict[str, dict[str, tuple[int, int]]] = {}
+        if bt_dir.exists():
+            for type_dir in bt_dir.iterdir():
+                if not type_dir.is_dir():
+                    continue
+                sp = type_dir / "_summary.csv"
+                if not sp.exists():
+                    continue
+                sdf = csv_io.read(sp)
+                if sdf.empty or "ticker" not in sdf.columns:
+                    continue
+                tname = type_dir.name
+                bs_map: dict[str, tuple[int, int]] = {}
+                for _, r in sdf.iterrows():
+                    tk = str(r["ticker"])
+                    bc = int(r.get("buy_count", 0) or 0)
+                    sc = int(r.get("sell_count", 0) or 0)
+                    bs_map[tk] = (bc, sc)
+                bt_buy_sell[tname] = bs_map
+
+        # ── best_strategy.csv 에서 시가총액 순위 로드 ───────────────────────
+        rank_by_ticker: dict[str, int | None] = {}
+        bs_path = paths.compare_dir(cfg.output_dir, label) / "best_strategy.csv"
+        bs_df = csv_io.read(bs_path)
+        if not bs_df.empty and "ticker" in bs_df.columns:
+            rank_col = "최고전략_매수일_시총순위"
+            if rank_col in bs_df.columns:
+                for _, r in bs_df.iterrows():
+                    tk = str(r["ticker"])
+                    rv = r.get(rank_col)
+                    rank_by_ticker[tk] = int(rv) if pd.notna(rv) and rv != 0 else None
+
+        period_data: dict = {}
+        for type_col in type_cols:
+            type_data: dict = {}
+            bs_map_for_type = bt_buy_sell.get(type_col, {})
+            for grp_name, grp_df in pt_df.groupby("group_name"):
+                col_vals = pd.to_numeric(grp_df[type_col], errors="coerce")
+                n_total = len(grp_df)
+                n_top = max(1, math.ceil(n_total * 0.1))
+                # 전체 종목을 수익률 내림차순 정렬 (NaN 은 맨 아래)
+                sorted_df = grp_df.assign(_ret=col_vals).sort_values(
+                    "_ret", ascending=False, na_position="last"
+                )
+                top_df = sorted_df.head(n_top)
+                ticker_list = []
+                for i, (_, row) in enumerate(top_df.iterrows()):
+                    tk = str(row["ticker"])
+                    bc, sc = bs_map_for_type.get(tk, (0, 0))
+                    hold_raw = row.get("avg_hold_days") if "avg_hold_days" in row.index else None
+                    hold_days = int(hold_raw) if hold_raw is not None and pd.notna(hold_raw) else None
+                    ticker_list.append({
+                        "rank": i + 1,
+                        "ticker": tk,
+                        "name": str(row["name"]),
+                        "return_pct": round(float(row["_ret"]), 2) if pd.notna(row["_ret"]) else 0.0,
+                        "buy_count": bc,
+                        "sell_count": sc,
+                        "avg_hold_days": hold_days,
+                        "market_rank": rank_by_ticker.get(tk),
+                    })
+                type_data[str(grp_name)] = {
+                    "group_size": n_total,
+                    "top_n": n_top,
+                    "tickers": ticker_list,
+                }
+            if type_data:
+                period_data[type_col] = type_data
+
+        result[label] = period_data
 
     return result
 

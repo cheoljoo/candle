@@ -142,7 +142,8 @@
             {% set ns.prev_strategy = r.strategy %}
             <tr class="border-t
               {% if is_total %}bg-slate-50 font-semibold{% endif %}
-              {% if strategy_changed and not loop.first %}border-t-2 border-slate-300{% endif %}">
+              {% if strategy_changed and not loop.first %}border-t-2 border-slate-300{% endif %}
+              {% if not is_total %}hover:bg-slate-50{% endif %}">
               <td class="px-3 py-2 font-medium">{{ r.strategy }}</td>
               <td class="px-3 py-2
                 {% if is_total %}text-slate-500 italic{% endif %}">
@@ -183,6 +184,7 @@
           </tbody>
         </table>
       </div>
+
     </div>
     {% endfor %}
     {% else %}
@@ -190,6 +192,146 @@
         compare 결과가 없습니다.
         <code>make v2-backtest-compare-full</code> 을 먼저 실행하세요.
       </p>
+    {% endif %}
+  </section>
+
+  {# ── 상위 10% 종목 상세 ──────────────────────────────────────────── #}
+  <section class="bg-white rounded-lg shadow-sm p-4"
+           x-data="{ top10_tab: '{{ compare_period_list[0] if compare_period_list else '' }}' }">
+    <h2 class="text-base font-semibold mb-1">📈 상위 10% 종목 상세</h2>
+    <p class="text-xs text-slate-400 mb-3">그룹 내 전체 종목 수 기준 상위 10%를 수익률 내림차순으로 표시합니다. 거래이력 버튼으로 해당 종목의 상세 거래를 확인하세요.</p>
+    {% if compare_period_list %}
+    {# 1단계 탭: 기간 #}
+    <div class="border-b mb-4 flex gap-1 flex-wrap text-sm">
+      {% for p in compare_period_list %}
+      <button @click="top10_tab='{{ p }}'"
+              :class="top10_tab==='{{ p }}' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500 hover:text-slate-700'"
+              class="px-3 py-2 whitespace-nowrap">{{ p }}</button>
+      {% endfor %}
+    </div>
+
+    {% for period, type_map in compare_top10.items() %}
+    <div x-show="top10_tab==='{{ period }}'"
+         x-data="{ selType: '{{ type_map.keys()|list|first if type_map else '' }}' }">
+      {% if type_map %}
+      {# 2단계 탭: 전략 (Type) #}
+      <div class="flex gap-1 flex-wrap mb-4 bg-slate-100 rounded-lg p-1">
+        {% for type_col in type_map %}
+        <button @click="selType='{{ type_col }}'"
+                :class="selType==='{{ type_col }}' ? 'bg-white shadow-sm text-indigo-700 font-semibold' : 'text-slate-500 hover:text-slate-700'"
+                class="px-4 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors">{{ type_col }}</button>
+        {% endfor %}
+      </div>
+
+      {% for type_col, group_map in type_map.items() %}
+      <div x-show="selType==='{{ type_col }}'">
+        {# 행 1: ETF_KR / ETF_US #}
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          {% for grp_name in ["ETF_KR", "ETF_US"] %}
+          {% if grp_name in group_map %}{% set grp_data = group_map[grp_name] %}
+          <div class="border border-slate-200 rounded-lg overflow-hidden">
+            <div class="flex items-center justify-between px-3 py-2 bg-amber-50 border-b border-amber-100">
+              <span class="font-semibold text-sm text-slate-800">{{ grp_name }}</span>
+              <span class="text-xs text-slate-500">상위 <strong>{{ grp_data.top_n }}</strong> / {{ grp_data.group_size }}개</span>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-xs">
+                <thead class="bg-white text-slate-500 border-b border-slate-100">
+                  <tr>
+                    <th class="text-right px-2 py-1.5 w-6 font-medium">#</th>
+                    <th class="text-left px-2 py-1.5 font-medium">종목</th>
+                    <th class="text-left px-2 py-1.5 font-medium">종목명</th>
+                    <th class="text-right px-2 py-1.5 font-medium">수익률</th>
+                    <th class="text-right px-2 py-1.5 font-medium">매수</th>
+                    <th class="text-right px-2 py-1.5 font-medium">매도</th>
+                    <th class="text-right px-2 py-1.5 font-medium">보유일</th>
+                    <th class="text-right px-2 py-1.5 font-medium" title="시가자본액 순위">RANK</th>
+                    <th class="text-center px-2 py-1.5 font-medium">거래이력</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in grp_data.tickers %}
+                  <tr class="border-t border-slate-100 hover:bg-slate-50">
+                    <td class="px-2 py-1.5 text-right text-slate-400 tabular-nums">{{ row.rank }}</td>
+                    <td class="px-2 py-1.5 font-mono text-slate-700">{{ row.ticker }}</td>
+                    <td class="px-2 py-1.5 text-slate-600 max-w-[7rem] truncate" title="{{ row.name }}">{{ row.name }}</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums font-semibold {% if row.return_pct >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">{{ "%.2f"|format(row.return_pct) }}%</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-500">{{ row.buy_count if row.buy_count else '—' }}</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-500">{{ row.sell_count if row.sell_count else '—' }}</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{% if row.avg_hold_days is not none %}{{ row.avg_hold_days }}일{% else %}—{% endif %}</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{% if row.market_rank is not none %}{{ row.market_rank }}{% else %}—{% endif %}</td>
+                    <td class="px-2 py-1.5 text-center">
+                      <a href="ticker_trades.html#{{ row.ticker }}:{{ type_col }}" class="inline-block text-xs px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded border border-indigo-200 hover:bg-indigo-100 hover:text-indigo-800">거래이력</a>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {% else %}
+          <div class="border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-slate-400 text-sm py-6">{{ grp_name }} 데이터 없음</div>
+          {% endif %}
+          {% endfor %}
+        </div>
+        {# 행 2: KOSPI200 / SP500 #}
+        <div class="grid grid-cols-2 gap-3">
+          {% for grp_name in ["KOSPI200", "SP500"] %}
+          {% if grp_name in group_map %}{% set grp_data = group_map[grp_name] %}
+          <div class="border border-slate-200 rounded-lg overflow-hidden">
+            <div class="flex items-center justify-between px-3 py-2 bg-sky-50 border-b border-sky-100">
+              <span class="font-semibold text-sm text-slate-800">{{ grp_name }}</span>
+              <span class="text-xs text-slate-500">상위 <strong>{{ grp_data.top_n }}</strong> / {{ grp_data.group_size }}개</span>
+            </div>
+            <div class="overflow-x-auto max-h-96">
+              <table class="min-w-full text-xs">
+                <thead class="bg-white text-slate-500 border-b border-slate-100 sticky top-0">
+                  <tr>
+                    <th class="text-right px-2 py-1.5 w-6 font-medium">#</th>
+                    <th class="text-left px-2 py-1.5 font-medium">종목</th>
+                    <th class="text-left px-2 py-1.5 font-medium">종목명</th>
+                    <th class="text-right px-2 py-1.5 font-medium">수익률</th>
+                    <th class="text-right px-2 py-1.5 font-medium">매수</th>
+                    <th class="text-right px-2 py-1.5 font-medium">매도</th>
+                    <th class="text-right px-2 py-1.5 font-medium">보유일</th>
+                    <th class="text-right px-2 py-1.5 font-medium" title="시가자본액 순위">RANK</th>
+                    <th class="text-center px-2 py-1.5 font-medium">거래이력</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in grp_data.tickers %}
+                  <tr class="border-t border-slate-100 hover:bg-slate-50">
+                    <td class="px-2 py-1.5 text-right text-slate-400 tabular-nums">{{ row.rank }}</td>
+                    <td class="px-2 py-1.5 font-mono text-slate-700">{{ row.ticker }}</td>
+                    <td class="px-2 py-1.5 text-slate-600 max-w-[7rem] truncate" title="{{ row.name }}">{{ row.name }}</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums font-semibold {% if row.return_pct >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">{{ "%.2f"|format(row.return_pct) }}%</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-500">{{ row.buy_count if row.buy_count else '—' }}</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-500">{{ row.sell_count if row.sell_count else '—' }}</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{% if row.avg_hold_days is not none %}{{ row.avg_hold_days }}일{% else %}—{% endif %}</td>
+                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{% if row.market_rank is not none %}{{ row.market_rank }}{% else %}—{% endif %}</td>
+                    <td class="px-2 py-1.5 text-center">
+                      <a href="ticker_trades.html#{{ row.ticker }}:{{ type_col }}" class="inline-block text-xs px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded border border-indigo-200 hover:bg-indigo-100 hover:text-indigo-800">거래이력</a>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {% else %}
+          <div class="border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-slate-400 text-sm py-6">{{ grp_name }} 데이터 없음</div>
+          {% endif %}
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="text-sm text-slate-400 py-4">이 기간에 데이터가 없습니다.</p>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="text-sm text-slate-500">compare 결과가 없습니다.</p>
     {% endif %}
   </section>
 

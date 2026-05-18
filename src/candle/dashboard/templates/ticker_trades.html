@@ -351,6 +351,26 @@
       return qty;
     });
 
+    // ── 현금 step-line (cash tracking 전략만) ──────────────────────
+    const cashArr = pDates.map(d => {
+      let cash = null;
+      for (const t of sortedTrades) {
+        if (t.date <= d) cash = t.cash != null ? parseFloat(t.cash) : null;
+        else break;
+      }
+      return cash;
+    });
+
+    // ── 주식수 × 종가 + 현금 (평가액+현금) ─────────────────────────
+    const equityArr = pDates.map((d, i) => {
+      const qty   = holdingQtyArr[i];
+      const close = parseFloat(pCloses[i]);
+      const cash  = cashArr[i];
+      if (cash == null || isNaN(close)) return null;
+      return qty * close + cash;
+    });
+    const hasEquity = equityArr.some(v => v != null);
+
     // ── 매수 / 매도 포인트 ─────────────────────────────────────────
     const tradeByDate = {};
     trades.forEach(t => {
@@ -362,14 +382,15 @@
     const sellPrices = pDates.map(d => (tradeByDate[d]?.side === 'sell' ? parseFloat(tradeByDate[d].price) : null));
 
     // ── tooltip 추가 데이터 ────────────────────────────────────────
-    const tradeInfo = pDates.map(d => {
+    const tradeInfo = pDates.map((d, i) => {
       const t = tradeByDate[d];
       if (!t) return null;
       return {
-        side: t.side,
-        cash: t.cash != null ? fmtNum(t.cash) : '—',
-        qty:  t.holding_qty != null ? fmtNum(t.holding_qty) : '—',
-        bsr:  t.buy_sell_return_pct != null ? fmtPct(t.buy_sell_return_pct) : null,
+        side:   t.side,
+        cash:   t.cash != null ? fmtNum(t.cash) : '—',
+        qty:    t.holding_qty != null ? fmtNum(t.holding_qty) : '—',
+        bsr:    t.buy_sell_return_pct != null ? fmtPct(t.buy_sell_return_pct) : null,
+        equity: equityArr[i] != null ? fmtNum(equityArr[i]) : null,
       };
     });
 
@@ -442,6 +463,18 @@
             yAxisID: 'yQty',
             order: 5,
           },
+          ...(hasEquity ? [{
+            label: '평가액+현금',
+            data: equityArr,
+            borderColor: 'rgb(99,102,241)',
+            backgroundColor: 'transparent',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0,
+            spanGaps: false,
+            yAxisID: 'yEquity',
+            order: 6,
+          }] : []),
         ],
       },
       options: {
@@ -460,6 +493,7 @@
                   const info = tradeInfo[ctx.dataIndex];
                   if (info) {
                     const lines = [base, `  현금: ${info.cash}`, `  보유수량: ${info.qty}`];
+                    if (info.equity != null) lines.push(`  평가액+현금: ${info.equity}`);
                     if (info.bsr) lines.push(`  Buy-Sell 수익률: ${info.bsr}`);
                     return lines;
                   }
@@ -476,15 +510,24 @@
           },
           yPrice: {
             position: 'left',
-            ticks: { font: { size: 10 }, maxTicksLimit: 6 },
-            title: { display: true, text: '가격', font: { size: 10 } },
+            ticks: { color: 'rgb(71,85,105)', font: { size: 10 }, maxTicksLimit: 6 },
+            title: { display: true, text: '가격', font: { size: 10 }, color: 'rgb(71,85,105)' },
           },
           yQty: {
             position: 'right',
-            ticks: { font: { size: 10 }, maxTicksLimit: 4 },
-            title: { display: true, text: '보유수량', font: { size: 10 } },
+            display: true,
+            ticks: { color: 'rgba(34,197,94,0.85)', font: { size: 10 }, maxTicksLimit: 4 },
+            title: { display: true, text: '보유수량', font: { size: 10 }, color: 'rgba(34,197,94,0.85)' },
             grid: { drawOnChartArea: false },
           },
+          ...(hasEquity ? {
+            yEquity: {
+              position: 'right',
+              ticks: { color: 'rgb(99,102,241)', font: { size: 10 }, maxTicksLimit: 6 },
+              title: { display: true, text: '평가액+현금', font: { size: 10 }, color: 'rgb(99,102,241)' },
+              grid: { drawOnChartArea: false },
+            },
+          } : {}),
         },
       },
     });
