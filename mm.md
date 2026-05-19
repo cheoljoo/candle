@@ -1,18 +1,13 @@
-feat: compare 상위10% 개편 + equity 차트 + UNKNOWN 제거 + 축 색상
+feat: add type0_2 buy-and-hold + type2_2_opt per-ticker optimized
 
-- compare/run.py: instruments.csv 미등록 ticker 제외 (UNKNOWN 그룹 제거)
-  2000-2015 기간 22개 편출 종목(삼성전자우 등) 필터링
-- render.py _load_compare_top10: 반환 구조 계층화 (period→type→group→tickers)
-  · backtest _summary.csv 로드 → buy_count/sell_count 추가
-  · best_strategy.csv 로드 → 최고전략_매수일_시총순위(RANK) 추가
-  · avg_hold_days 포함 / 분모=그룹 전체 종목 수 (비영리 필터 제거)
-- compare.html 상위 10% 섹션 전면 개편
-  · 기존 팝업 방식 → 독립 section + 2단계 탭 (기간 / 전략 타입)
-  · 2×2 그리드: 행1=(ETF_KR|ETF_US) / 행2=(KOSPI200|SP500)
-  · 테이블 컬럼: 수익률 + 매수 + 매도 + 보유일 + RANK + 거래이력 버튼
-- ticker_trades.html 차트 개선
-  · equity 라인 추가: 보유수량×종가+현금 (평가액+현금, indigo)
-  · tooltip에 평가액+현금 표시
-  · yQty 축 display:true (green, 보유수량 제목)
-  · yEquity 축 색상 indigo / yPrice 축 색상 slate
+- backtest/type0_2.py 신규: 첫 거래일 전액매수 후 보유, 매도 없음 (벤치마크)
+- backtest/type2_2_opt.py 신규: type2_2 로직 + 종목별 최적화 plus/minus_days 사용
+- backtest/run.py: _opt_params.json으로 파라미터 변경 감지 (변경 시 full 재계산)
+  · _load_opt_params_current(): per_ticker/_summary.json → fallback=strategies.yml
+  · _dispatch()/resume(): type0_2 + type2_2_opt 케이스 추가
+- config/strategies.yml: type0_2·type2_2_opt 항목 + enabled_types에 추가
+  · type2_2_opt fallback_plus_days=33, fallback_minus_days=5
+- src/candle/config.py: ALL_TYPES 튜플에 type0_2·type2_2_opt 추가
+- src/candle/backtest/__init__.py: 신규 모듈 import + ALL_TYPES 갱신
+- claude-opus-4-7_guide.md: 17차 업데이트 (backtest 구조, optimize 섹션)
 

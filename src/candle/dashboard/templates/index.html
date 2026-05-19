@@ -269,6 +269,10 @@
                    class="inline-block px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100 whitespace-nowrap">📊 수익률</a>
                 <a href="optimize.html"
                    class="inline-block px-2 py-0.5 text-xs bg-violet-50 text-violet-700 rounded hover:bg-violet-100 whitespace-nowrap">⚙ 최적화</a>
+                {% if r.ticker in tickers_with_trades %}
+                <a href="ticker_trades.html#{{ r.ticker }}"
+                   class="inline-block px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100 whitespace-nowrap">📋 거래 상세 내역</a>
+                {% endif %}
               </div>
             </td>
           </tr>

@@ -25,6 +25,8 @@
 
 {% include "_nav.html" %}
 
+{% include "_type_legend.html" %}
+
 <main class="max-w-7xl mx-auto p-4 space-y-6" id="main-content">
   <div class="text-center py-12 text-slate-400" id="loading-msg">데이터 로딩 중...</div>
 </main>
@@ -188,7 +190,7 @@
                 <th class="text-left px-3 py-2">전략</th>
                 <th class="text-right px-3 py-2">매수</th>
                 <th class="text-right px-3 py-2">매도</th>
-                <th class="text-right px-3 py-2">최종 수익률</th>
+                <th class="text-right px-3 py-2" title="마지막 거래 시점 누적 포트폴리오 수익률 (${data.period || 'full'} 기간)">최종 수익률</th>
                 <th class="text-right px-3 py-2 text-amber-700">MDD (%)</th>
                 <th class="text-right px-3 py-2 text-sky-700">승률 (%)</th>
                 <th class="text-right px-3 py-2">보유일</th>
@@ -221,11 +223,111 @@
       </section>`;
     main.insertAdjacentHTML('beforeend', summaryHtml);
 
+    // ── 기간별 수익률 테이블 ──────────────────────────────────────────
+    const periodList = data.period_list || [];
+    const periodReturns = data.period_returns || {};
+    if (periodList.length > 0 && Object.keys(periodReturns).length > 0) {
+      const allTypeNames = Object.keys(types);
+      const periodHeaders = periodList.map(p =>
+        `<th class="text-right px-3 py-2 whitespace-nowrap font-normal text-slate-600" title="${p}">${p}</th>`
+      ).join('');
+      const periodRows = allTypeNames.map(tname => {
+        const pmap = periodReturns[tname] || {};
+        const cells = periodList.map(p => {
+          const v = pmap[p];
+          if (v == null) return `<td class="px-3 py-1.5 text-right text-slate-300 tabular-nums text-xs">—</td>`;
+          const cls = v >= 0 ? 'text-emerald-700' : 'text-rose-700';
+          return `<td class="px-3 py-1.5 text-right tabular-nums text-xs font-semibold ${cls}">${fmtPct(v)}</td>`;
+        }).join('');
+        const isOff = ENABLED_TYPES.size && !ENABLED_TYPES.has(tname);
+        return `<tr class="border-t${isOff ? ' opacity-50' : ''}">
+          <td class="px-3 py-1.5 font-mono font-semibold text-xs">${tname}</td>
+          ${cells}
+        </tr>`;
+      }).join('');
+      const periodTableHtml = `
+      <section class="bg-white rounded-lg shadow-sm p-4">
+        <h2 class="text-base font-semibold mb-1">📅 기간별 수익률</h2>
+        <p class="text-xs text-slate-400 mb-3">각 백테스트 기간(Period) 종료 시점의 누적 포트폴리오 수익률입니다. <span class="font-medium text-slate-600">최종 수익률</span>은 평균이 아닌 해당 기간 마지막 거래 시점의 누적 수익률입니다.</p>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm" data-sortable>
+            <thead class="bg-slate-100 text-slate-600 text-xs">
+              <tr>
+                <th class="text-left px-3 py-2">전략</th>
+                ${periodHeaders}
+              </tr>
+            </thead>
+            <tbody>${periodRows}</tbody>
+          </table>
+        </div>
+      </section>`;
+      main.insertAdjacentHTML('beforeend', periodTableHtml);
+    }
+
+    // ── 기간별 주식수 테이블 ──────────────────────────────────────────
+    const periodSellQty = data.period_sell_qty || {};
+    if (periodList.length > 0 && Object.keys(periodSellQty).length > 0) {
+      const allTypeNames = Object.keys(types);
+      function fmtQtyCell(first, lastBuy, final) {
+        if (first == null && lastBuy == null) {
+          return `<span class="text-slate-300" title="데이터 없음">—</span>`;
+        }
+        const fStr = first != null ? first.toLocaleString('ko-KR') : '?';
+        const lStr = lastBuy != null ? lastBuy.toLocaleString('ko-KR') : '?';
+        const fCls = (first != null && lastBuy != null && first > lastBuy)
+          ? 'text-rose-700 font-semibold' : 'text-slate-500';
+        const lCls = (first != null && lastBuy != null && lastBuy > first)
+          ? 'text-emerald-700 font-semibold' : 'text-slate-500';
+        const same = (lastBuy === final);
+        const finalPart = (!same && final != null)
+          ? `<span class="text-slate-400 text-[10px] ml-0.5">(${final.toLocaleString('ko-KR')})</span>` : '';
+        return `<span class="${fCls}">${fStr}</span><span class="text-slate-300 mx-1">→</span><span class="${lCls}">${lStr}</span>${finalPart}`;
+      }
+      const periodQtyHeaders = periodList.map(p =>
+        `<th class="text-right px-3 py-2 whitespace-nowrap font-normal text-slate-600">${p}</th>`
+      ).join('');
+      const periodQtyRows = allTypeNames.map(tname => {
+        const pmap = periodSellQty[tname] || {};
+        const cells = periodList.map(p => {
+          const v = pmap[p];
+          const cell = v ? fmtQtyCell(v.first, v.last_buy, v.final) : `<span class="text-slate-200">—</span>`;
+          return `<td class="px-3 py-1.5 text-right tabular-nums text-xs">${cell}</td>`;
+        }).join('');
+        const isOff = ENABLED_TYPES.size && !ENABLED_TYPES.has(tname);
+        return `<tr class="border-t${isOff ? ' opacity-50' : ''}">
+          <td class="px-3 py-1.5 font-mono font-semibold text-xs">${tname}</td>
+          ${cells}
+        </tr>`;
+      }).join('');
+      const periodQtyHtml = `
+      <section class="bg-white rounded-lg shadow-sm p-4">
+        <h2 class="text-base font-semibold mb-1">📦 기간별 주식수</h2>
+        <p class="text-xs text-slate-400 mb-3"><span class="text-slate-500 font-medium">처음주식수 → 최종주식수(마지막 가진 주식수)</span> — <b>처음주식수</b>: 첫 번째 BUY 시 매수한 qty. <b>최종주식수</b>: 마지막 BUY 후 holding_qty. <b>(마지막 가진 주식수)</b>: 마지막 SELL까지 고려한 최종 남은 주식수 (같으면 생략). <span class="text-rose-700">빨강</span>: 처음이 더 많음, <span class="text-emerald-700">초록</span>: 최종이 더 많음.</p>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm" data-sortable>
+            <thead class="bg-slate-100 text-slate-600 text-xs">
+              <tr>
+                <th class="text-left px-3 py-2">전략</th>
+                ${periodQtyHeaders}
+              </tr>
+            </thead>
+            <tbody>${periodQtyRows}</tbody>
+          </table>
+        </div>
+      </section>`;
+      main.insertAdjacentHTML('beforeend', periodQtyHtml);
+    }
+
     // 전략별 상세 거래 테이블 + 차트
     for (const [tname, trades] of Object.entries(types)) {
       const btn_id = `btn-${tname}`;
       const tbl_id = `tbl-${tname}`;
       const chart_id = `chart-${tname}`;
+      // type2_2_opt: plus_days / minus_days 배지
+      const optParams = (data.type_params || {})[tname];
+      const optBadge = optParams
+        ? `<span class="ml-2 text-xs px-2 py-0.5 bg-violet-100 text-violet-700 rounded border border-violet-200 font-mono">+${optParams.plus_days}일 / −${optParams.minus_days}일</span>`
+        : '';
       const rows = trades.map(t => {
         const sideCls = t.side === 'buy' ? 'text-emerald-700 font-semibold' :
                         t.side === 'sell' ? 'text-rose-700 font-semibold' : 'text-slate-400 italic';
@@ -263,7 +365,7 @@
         <section class="bg-white rounded-lg shadow-sm p-4" id="section-${tname}">
           <div class="flex items-center justify-between mb-2">
             <div>
-              <h2 class="text-sm font-semibold font-mono">${tname} — 거래 상세 (${trades.length}건)${onOffBadge}</h2>
+              <h2 class="text-sm font-semibold font-mono">${tname} — 거래 상세 (${trades.length}건)${onOffBadge}${optBadge}</h2>
               ${descHtml}
             </div>
             <button id="${btn_id}" onclick="toggleTable('${tbl_id}','${btn_id}')"

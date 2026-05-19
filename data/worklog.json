@@ -427,5 +427,51 @@
         "desc": "최신 commit msg 추가"
       }
     ]
+  },
+  {
+    "date": "2026-05-19",
+    "session": "75377b96-5c13-4e43-a794-7efa60a959d8",
+    "tool": "vscode-copilot",
+    "start": "22:00",
+    "end": "22:15",
+    "duration": "15m",
+    "items": [
+      {
+        "file": "src/candle/backtest/type0_2.py",
+        "desc": "신규: 매수 후 보유 벤치마크 전략"
+      },
+      {
+        "file": "src/candle/backtest/type2_2_opt.py",
+        "desc": "신규: type2_2 로직 + 종목별 최적화 파라미터"
+      },
+      {
+        "file": "src/candle/backtest/run.py",
+        "desc": "_opt_params.json 변경 감지 + type0_2/type2_2_opt dispatch 추가"
+      },
+      {
+        "file": "config/strategies.yml",
+        "desc": "type0_2·type2_2_opt 항목 + enabled_types 추가"
+      },
+      {
+        "file": "src/candle/config.py",
+        "desc": "ALL_TYPES 갱신"
+      },
+      {
+        "file": "src/candle/backtest/__init__.py",
+        "desc": "신규 모듈 import + ALL_TYPES 갱신"
+      },
+      {
+        "file": "claude-work.md",
+        "desc": "2026-05-19 4차 항목 추가"
+      },
+      {
+        "file": "claude-opus-4-7_guide.md",
+        "desc": "17차 업데이트"
+      },
+      {
+        "file": "mm.md",
+        "desc": "최신 commit msg 추가"
+      }
+    ]
   }
 ]

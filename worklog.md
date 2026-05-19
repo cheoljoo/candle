@@ -1,4 +1,15 @@
-## 2026-05-16 22:00 ~ 22:30 (30m) [tool: vscode-copilot / session: eac70b04-1c02-4033-a86d-3c01f01ca2b7]
+## 2026-05-19 22:00 ~ 22:15 (15m) [tool: vscode-copilot / session: 75377b96-5c13-4e43-a794-7efa60a959d8]
+- `src/candle/backtest/type0_2.py` 신규: 매수 후 보유 벤치마크 전략 (첫 거래일 전액매수, 종가 mark_to_market만)
+- `src/candle/backtest/type2_2_opt.py` 신규: type2_2 동일 로직, 종목별 최적화 파라미터 사용 (`type_name="type2_2_opt"`)
+- `src/candle/backtest/run.py`: `_opt_params.json` 기반 파라미터 변경 감지 + `_dispatch`/`_resume`에 신규 타입 추가
+- `config/strategies.yml`: type0_2·type2_2_opt 항목 + enabled_types 추가 (fallback_plus=33, fallback_minus=5)
+- `src/candle/config.py`: `ALL_TYPES` 튜플 갱신
+- `src/candle/backtest/__init__.py`: 신규 모듈 import + ALL_TYPES 리스트 갱신
+- `claude-work.md`: 2026-05-19 4차 항목 추가
+- `claude-opus-4-7_guide.md`: 17차 업데이트 (backtest 구조 + optimize per-ticker + type2_2_opt 가이드)
+- `mm.md`: 최신 commit msg 추가
+
+
 - `Makefile` : `v2-all-kr` 신규 — 한국장 종료 후 KR 전용 파이프라인 (fetch-kr→analyze-kr→backtest-kr→simulate→market-signals→dashboard)
 - `Makefile` : `v2-all-us` 신규 — 미국장 종료 후 US 전용 파이프라인 (fetch-us→analyze-us→backtest-us→simulate→dashboard)
 - `Makefile` : `v2-fetch-kr/us`, `v2-analyze-kr/us`, `v2-backtest-kr/us`, `v2-backtest-compare-full/5y-kr/us` 단계별 타겟 추가

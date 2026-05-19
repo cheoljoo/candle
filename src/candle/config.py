@@ -28,9 +28,11 @@ class Config:
 
     # 모든 type 고정 순서 (순서 변경 금지)
     ALL_TYPES: tuple[str, ...] = (
+        "type0_2",
         "type1_1", "type1_2",
         "type2_1", "type2_2",
         "type2_1b", "type2_2b",
+        "type2_2_opt",
         "type3",
     )
 

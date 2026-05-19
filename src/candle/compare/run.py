@@ -20,7 +20,7 @@ from ..storage import csv_io, paths
 
 log = logging.getLogger(__name__)
 
-CASH_TRACKING_TYPES = {"type1_2", "type2_2", "type2_2b", "type3"}
+CASH_TRACKING_TYPES = {"type1_2", "type2_2", "type2_2b", "type2_2_opt", "type3"}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 리스크 지표 헬퍼

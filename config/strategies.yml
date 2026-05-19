@@ -38,6 +38,18 @@ type3:
   description: "신호 무시. 3개월(90일)마다 적립식 매수, 매도 없음."
   interval_days: 90
 
+type0_2:
+  description: "매수 후 보유 — 첫 거래일에 KRW/USD 전액 매수, 매도 없음, 종가로만 수익률 평가."
+
+type2_2_opt:
+  description: >
+    종목별 최적화 plus_days/minus_days로 type2_2 실행.
+    optimize-streak --all-groups 결과(output/optimize/per_ticker/{group}/_summary.json)에서
+    각 종목의 최적 파라미터를 로드하여 전액매수/전량매도 전략 수행.
+    파라미터가 없는 종목은 type2_2b 기본값(plus=33, minus=5)으로 폴백.
+  fallback_plus_days: 1
+  fallback_minus_days: 5
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 활성화할 backtest type 목록
 #
@@ -52,3 +64,5 @@ enabled_types:
   - type2_2
   - type2_2b
   - type3
+  - type0_2
+  - type2_2_opt

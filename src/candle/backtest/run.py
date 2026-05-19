@@ -5,9 +5,14 @@
 - from/to 동일 → skip
 - from 이 당겨짐  → 전체 재계산
 - to 만 늘어남   → 직전 Portfolio 상태 복원 후 새 구간만 계산 → 기존 CSV 에 append
+
+type2_2_opt 증분 처리:
+- output/backtest/{label}/type2_2_opt/_opt_params.json 에 ticker별 (plus_days, minus_days) 저장
+- 파라미터 변경 감지 시 해당 ticker 전체 재계산 (full), 동일 시 증분(resume) 적용
 """
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import date, timedelta
@@ -18,11 +23,11 @@ import pandas as pd
 from .. import config
 from ..io_report import announce, tprint
 from ..storage import csv_io, paths
-from . import type1_1, type1_2, type2_1, type2_2, type3, base
+from . import type0_2, type1_1, type1_2, type2_1, type2_2, type2_2_opt, type3, base
 
 log = logging.getLogger(__name__)
 
-ALL = ["type1_1", "type1_2", "type2_1", "type2_2", "type2_1b", "type2_2b", "type3"]
+ALL = ["type0_2", "type1_1", "type1_2", "type2_1", "type2_2", "type2_1b", "type2_2b", "type2_2_opt", "type3"]
 
 # ── 증분 meta I/O ─────────────────────────────────────────────────────────
 _META_FILE = "_meta.csv"
@@ -51,6 +56,72 @@ def _save_meta(out_root: Path, meta: dict[tuple[str, str], tuple[str, str]]) -> 
             for k, v in meta.items()]
     df = pd.DataFrame(rows, columns=_META_COLS).sort_values(["type", "ticker"])
     csv_io.atomic_write(df, out_root / _META_FILE)
+
+
+# ── type2_2_opt 최적화 파라미터 I/O ───────────────────────────────────────
+_OPT_PARAMS_FILE = "_opt_params.json"
+
+
+def _load_opt_params_used(out_dir: Path) -> dict[str, tuple[int, int]]:
+    """type2_2_opt 가 지난 번 사용한 (plus_days, minus_days) 로드.
+
+    반환: {ticker: (plus_days, minus_days)}
+    """
+    p = out_dir / _OPT_PARAMS_FILE
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return {tk: (int(v["plus_days"]), int(v["minus_days"])) for tk, v in data.items()}
+    except Exception as e:
+        log.warning(f"_opt_params.json 로드 실패: {e}")
+        return {}
+
+
+def _save_opt_params_used(out_dir: Path,
+                          params: dict[str, tuple[int, int]]) -> None:
+    data = {tk: {"plus_days": pd_val, "minus_days": md_val}
+            for tk, (pd_val, md_val) in params.items()}
+    (out_dir / _OPT_PARAMS_FILE).write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _load_opt_params_current(cfg: config.Config,
+                              inst: pd.DataFrame) -> dict[str, tuple[int, int]]:
+    """output/optimize/per_ticker/{group}/_summary.json 에서 종목별 최적 파라미터 로드.
+
+    반환: {ticker: (plus_days, minus_days)}
+    파일이 없거나 ticker가 없으면 strategies.yml fallback 값 사용.
+    """
+    s = cfg.strategies.get("type2_2_opt", {})
+    fallback_p = int(s.get("fallback_plus_days", 33))
+    fallback_m = int(s.get("fallback_minus_days", 5))
+
+    opt_root = cfg.output_dir / "optimize" / "per_ticker"
+    group_cache: dict[str, dict] = {}
+
+    result: dict[str, tuple[int, int]] = {}
+    for _, row in inst.iterrows():
+        ticker     = str(row["ticker"])
+        group_name = str(row.get("group_name", ""))
+        if group_name not in group_cache:
+            summary_path = opt_root / group_name / "_summary.json"
+            if summary_path.exists():
+                try:
+                    group_cache[group_name] = json.loads(
+                        summary_path.read_text(encoding="utf-8"))
+                except Exception as e:
+                    log.warning(f"opt _summary.json 로드 실패 ({group_name}): {e}")
+                    group_cache[group_name] = {}
+            else:
+                group_cache[group_name] = {}
+
+        entry = group_cache[group_name].get(ticker, {})
+        result[ticker] = (
+            int(entry.get("plus_days",  fallback_p)),
+            int(entry.get("minus_days", fallback_m)),
+        )
+    return result
 
 
 def _initial_cash(cfg: config.Config, currency: str) -> float:
@@ -113,6 +184,16 @@ def run(cfg: config.Config, type_names: list[str], market: str,
 
         tprint(f"[backtest] {_label}type={type_name} ({type_idx}/{n_types}) 시작 — {total}개 ticker", flush=True)
 
+        # ── type2_2_opt: 최적화 파라미터 로드 및 변경 감지 ──────────────────
+        cur_opt_params: dict[str, tuple[int, int]] = {}
+        prev_opt_params: dict[str, tuple[int, int]] = {}
+        updated_opt_params: dict[str, tuple[int, int]] = {}
+        if type_name == "type2_2_opt":
+            cur_opt_params  = _load_opt_params_current(cfg, inst)
+            prev_opt_params = _load_opt_params_used(out_dir)
+            tprint(f"[backtest] {_label}type2_2_opt — "
+                   f"opt 파라미터 로드 완료 ({len(cur_opt_params)}개 종목)", flush=True)
+
         for i, (_, row) in enumerate(inst.iterrows(), start=1):
             ticker   = str(row["ticker"])
             mkt      = str(row["market"])
@@ -140,6 +221,16 @@ def run(cfg: config.Config, type_names: list[str], market: str,
                     mode = "resume"
                 # prev[0] != eff_from → full (from 이 달라짐)
 
+            # type2_2_opt: 최적화 파라미터가 변경된 경우 강제 full 재계산
+            if type_name == "type2_2_opt" and mode != "full":
+                opt_cur  = cur_opt_params.get(ticker)
+                opt_prev = prev_opt_params.get(ticker)
+                if opt_cur is not None and opt_cur != opt_prev:
+                    mode = "full"
+                    if debug:
+                        print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker}"
+                              f" opt params changed {opt_prev}→{opt_cur}, force full", flush=True)
+
             if mode == "skip":
                 skipped_count += 1
                 # 기존 trades 로 summary 재구성
@@ -152,6 +243,9 @@ def run(cfg: config.Config, type_names: list[str], market: str,
                                                             last_row))
                     all_trades.append(existing)
                 updated_meta[(type_name, ticker)] = prev
+                # type2_2_opt: skip 시에는 기존 파라미터 유지 (변경 없음이 보장됨)
+                if type_name == "type2_2_opt" and ticker in cur_opt_params:
+                    updated_opt_params[ticker] = cur_opt_params[ticker]
                 if debug:
                     print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} SKIP — from={eff_from} to={eff_to}", flush=True)
                 if i % _progress_step == 0 or i == total:
@@ -159,10 +253,17 @@ def run(cfg: config.Config, type_names: list[str], market: str,
                 continue
 
             try:
+                # type2_2_opt: 현재 ticker의 최적 파라미터 추출
+                _opt_p = cur_opt_params.get(ticker)
+                _opt_plus  = _opt_p[0] if _opt_p else None
+                _opt_minus = _opt_p[1] if _opt_p else None
+
                 if mode == "resume":
                     existing = csv_io.read(trades_path)
                     pf, new_start = _resume(type_name, ticker, daily, currency, cfg,
-                                            existing, prev[1], end)
+                                            existing, prev[1], end,
+                                            opt_plus_days=_opt_plus,
+                                            opt_minus_days=_opt_minus)
                     new_trades = pf.trades_df()
                     if new_trades.empty:
                         # 새 신호 없음 — 기존 유지
@@ -190,7 +291,8 @@ def run(cfg: config.Config, type_names: list[str], market: str,
                         if debug:
                             print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} resume +{len(new_trades)}건 ({time.perf_counter()-t0:.2f}s)", flush=True)
                 else:
-                    pf = _dispatch(type_name, ticker, daily, currency, cfg, start, end)
+                    pf = _dispatch(type_name, ticker, daily, currency, cfg, start, end,
+                                   opt_plus_days=_opt_plus, opt_minus_days=_opt_minus)
                     if pf is None:
                         continue
                     new_trades = pf.trades_df()
@@ -211,6 +313,10 @@ def run(cfg: config.Config, type_names: list[str], market: str,
                     print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} FAIL: {e}", flush=True)
                 continue
 
+            # type2_2_opt: 처리 완료 후 사용한 파라미터 기록
+            if type_name == "type2_2_opt" and ticker in cur_opt_params:
+                updated_opt_params[ticker] = cur_opt_params[ticker]
+
             if i % _progress_step == 0 or i == total:
                 _print_progress(_label, type_name, i, total, len(per_ticker_summary), type_t0)
 
@@ -218,6 +324,9 @@ def run(cfg: config.Config, type_names: list[str], market: str,
             csv_io.atomic_write(pd.concat(all_trades, ignore_index=True), out_dir / "_all.csv")
         if per_ticker_summary:
             csv_io.atomic_write(pd.DataFrame(per_ticker_summary), out_dir / "_summary.csv")
+        # type2_2_opt: 사용한 파라미터 저장 (다음 실행 시 변경 감지에 사용)
+        if type_name == "type2_2_opt" and updated_opt_params:
+            _save_opt_params_used(out_dir, updated_opt_params)
         results[type_name] = {
             "tickers": len(per_ticker_summary),
             "skipped": skipped_count,
@@ -274,7 +383,9 @@ def _summary_row(type_name: str, ticker: str, inst_row, currency: str,
 
 def _resume(type_name: str, ticker: str, daily: pd.DataFrame,
             currency: str, cfg, existing_trades: pd.DataFrame,
-            prev_to: str, end: date | None):
+            prev_to: str, end: date | None,
+            opt_plus_days: int | None = None,
+            opt_minus_days: int | None = None):
     """기존 trades 에서 Portfolio 상태를 복원하고 prev_to 다음 날부터만 계산."""
     s = cfg.strategies
     # 새 구간 시작일
@@ -282,7 +393,7 @@ def _resume(type_name: str, ticker: str, daily: pd.DataFrame,
     new_start = prev_to_date + timedelta(days=1)
 
     initial_cash = None
-    if type_name in ("type1_2", "type2_2", "type2_2b"):
+    if type_name in ("type0_2", "type1_2", "type2_2", "type2_2b", "type2_2_opt"):
         initial_cash = _initial_cash(cfg, currency)
     elif type_name == "type3":
         # type3 initial_cash 는 누적 입금액 — 기존 buy × installment_amount
@@ -301,15 +412,22 @@ def _resume(type_name: str, ticker: str, daily: pd.DataFrame,
 
     return _dispatch(type_name, ticker, daily, currency, cfg,
                      new_start, end, portfolio=pf,
-                     last_buy_date=last_buy_date), new_start
+                     last_buy_date=last_buy_date,
+                     opt_plus_days=opt_plus_days,
+                     opt_minus_days=opt_minus_days), new_start
 
 
 def _dispatch(type_name: str, ticker: str, daily: pd.DataFrame,
               currency: str, cfg: config.Config,
               start: date | None, end: date | None,
               portfolio: base.Portfolio | None = None,
-              last_buy_date: str | None = None) -> base.Portfolio | None:
+              last_buy_date: str | None = None,
+              opt_plus_days: int | None = None,
+              opt_minus_days: int | None = None) -> base.Portfolio | None:
     s = cfg.strategies
+    if type_name == "type0_2":
+        return type0_2.run_one(ticker, daily, initial_cash=_initial_cash(cfg, currency),
+                                start=start, end=end, portfolio=portfolio)
     if type_name == "type1_1":
         return type1_1.run_one(ticker, daily, qty=int(s["type1_1"]["qty"]),
                                 start=start, end=end, portfolio=portfolio)
@@ -336,6 +454,13 @@ def _dispatch(type_name: str, ticker: str, daily: pd.DataFrame,
                                 plus_days=int(s["type2_2b"]["plus_days"]),
                                 minus_days=int(s["type2_2b"]["minus_days"]),
                                 start=start, end=end, portfolio=portfolio)
+    if type_name == "type2_2_opt":
+        t2opt = s.get("type2_2_opt", {})
+        p_days = opt_plus_days  if opt_plus_days  is not None else int(t2opt.get("fallback_plus_days",  33))
+        m_days = opt_minus_days if opt_minus_days is not None else int(t2opt.get("fallback_minus_days", 5))
+        return type2_2_opt.run_one(ticker, daily, initial_cash=_initial_cash(cfg, currency),
+                                    plus_days=p_days, minus_days=m_days,
+                                    start=start, end=end, portfolio=portfolio)
     if type_name == "type3":
         return type3.run_one(ticker, daily,
                               installment_amount=_initial_cash(cfg, currency),

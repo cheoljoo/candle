@@ -1186,3 +1186,77 @@
   - `yPrice` 축: 라벨 색 `rgb(71,85,105)` (slate).
   - `yQty` 축: `display: false` → **`true`**, 색 `rgba(34,197,94,0.85)` (green), 제목 '보유수량'.
   - `yEquity` 축: 색 `rgb(99,102,241)` (indigo), 제목 '평가액+현금'.
+
+---
+
+## 2026-05-19 (4차 — type0_2 매수후보유 + type2_2_opt 종목별최적화 신규 전략 추가)
+
+### type0_2 (매수 후 보유 — 벤치마크) 신규 구현
+
+- **사용자 요청** : 벤치마크 전략으로, 첫 거래일에 전액 매수하고 절대 팔지 않는 buy-and-hold 타입 추가.
+- **구현** (`src/candle/backtest/type0_2.py` 신규)
+  - `run_one(ticker, daily, initial_cash, start, end, portfolio=None)` : `p.qty == 0 and p.cash > 0` 조건일 때 첫 row에서 전액 매수. 이후 마지막 row에서 `mark_to_market`만 호출.
+  - `type_name = "type0_2"`, `initial_cash = KRW_INITIAL_CASH / USD_INITIAL_CASH` 자동 판별 (KR/US ticker).
+  - 검증: 005930(삼성전자) 2000-01-04~2026-05-19 구간 실행 → 2 trades (buy + mark_to_market), `return_pct=4407.22%` 확인.
+
+### type2_2_opt (종목별 최적화 파라미터 type2_2) 신규 구현
+
+- **사용자 요청** : `optimize-streak --all-groups` 결과에서 종목별 최적 `plus_days`/`minus_days`를 읽어 type2_2와 동일 로직으로 실행하는 타입 추가.
+- **구현** (`src/candle/backtest/type2_2_opt.py` 신규)
+  - `run_one(ticker, daily, initial_cash, plus_days, minus_days, start, end, portfolio=None)` : type2_2 완전 동일 알고리즘, `type_name="type2_2_opt"`.
+  - `_init_streak`은 `type2_1` 모듈에서 import 재사용.
+  - 검증: 005930 plus=15, minus=1 → 58 trades, `return_pct=2294.23%` 확인.
+
+### run.py — type2_2_opt 증분 처리 + opt_params 변경 감지
+
+- **구현** (`src/candle/backtest/run.py` 수정)
+  - `_load_opt_params_used(out_dir)` / `_save_opt_params_used(out_dir, params)` : `_opt_params.json`을 통해 이전 실행의 (plus_days, minus_days)를 기록·비교.
+  - `_load_opt_params_current(cfg, inst)` : `output/optimize/per_ticker/{group}/_summary.json`에서 종목별 최적 파라미터 로드. 없는 종목은 `strategies.yml`의 `fallback_plus_days/minus_days` 적용.
+  - 파라미터 변경 감지 시 `mode = "full"` 강제 → 해당 종목 전체 재계산.
+  - 파라미터 미변경 + 새 데이터 있으면 증분 처리 (기존 resume 로직 유지).
+  - `_resume()` : `"type0_2"`, `"type2_2_opt"` 추가 인식 (initial_cash 계산 포함).
+  - `_dispatch()` : `type0_2` 케이스 (`type0_2.run_one(...)`) + `type2_2_opt` 케이스 (opt_params 로드 후 `type2_2_opt.run_one(...)`) 추가.
+  - 검증: `_load_opt_params_current` 호출 → 720개 ticker 파라미터 정상 로드 확인.
+
+### config 파일 업데이트
+
+- **`config/strategies.yml`** 수정
+  - `type0_2` 항목 추가: 매수 후 보유 설명.
+  - `type2_2_opt` 항목 추가: 설명 + `fallback_plus_days: 33`, `fallback_minus_days: 5`.
+  - `enabled_types` 에 `type0_2`, `type2_2_opt` 추가.
+- **`src/candle/config.py`** : `ALL_TYPES` 튜플에 `"type0_2"`, `"type2_2_opt"` 추가.
+- **`src/candle/backtest/__init__.py`** : `type0_2`, `type2_2_opt` import + `ALL_TYPES` 리스트 갱신.
+- **문서 업데이트** : `claude-opus-4-7_guide.md` 17차 (backtest 디렉터리 목록, optimize per-ticker 섹션, type2_2_opt 활용 가이드, 헤더 요약) 갱신.
+
+---
+
+## 2026-05-20
+
+### compare 상위 10% / 거래 이력 — 주식수 3개 개념 분리 (처음·최종·마지막가진)
+
+- **배경** : 기존 "처음주식수/마지막보유수" 2컬럼 의미가 불명확하고, SELL 없는 전략(type0_2, type3)에서 데이터가 없어 `—` 표시되던 문제. 사용자 요청으로 3개 개념을 명확히 정의하고 표시 방식 개선.
+- **3개 개념 정의**
+  - **처음주식수** : 첫 번째 BUY row의 `qty` (처음 매수한 주수)
+  - **최종주식수** : 마지막 BUY row의 `holding_qty` (마지막 매수 후 누적 보유 수량)
+  - **마지막 가진 주식수** : 마지막 row의 `holding_qty` (SELL 후 남은 수량 — 전량 매도 시 0)
+- **수정** (`src/candle/dashboard/render.py`)
+  - `_load_compare_top10()` : 기존 sell 기반 로직 전면 교체. 통합 단일 루프.
+    - `bt_first_sell_qty` (처음주식수: 첫 BUY qty)
+    - `bt_last_sell_qty` (최종주식수: 마지막 BUY holding_qty)
+    - `bt_final_qty` (마지막 가진 주식수: 마지막 행 holding_qty)
+    - SELL 유무 관계없이 동일 로직 → type0_2, type3, type2_2_opt 모두 정상 표시.
+  - `_generate_trade_jsons()` : `period_sell_qty` 항목에 `first`(처음), `last`(최종=마지막BUY), `final`(마지막가진) 3개 값으로 확장.
+- **수정** (`src/candle/dashboard/templates/compare.html`)
+  - 열 헤더 "처음주식수" / "최종주식수(마지막가진주식수)" 표시.
+  - 컬럼2: 최종주식수(last BUY holding_qty) · 마지막 가진 주식수(final holding_qty) 두 값 함께 표시.
+  - 색상: 처음 > 최종 → 처음 빨강; 마지막가진 > 처음 → 마지막가진 초록.
+- **수정** (`src/candle/dashboard/templates/ticker_trades.html`)
+  - 기간별 주식수 섹션: "처음주식수 → 최종주식수(마지막 가진 주식수)" 형식으로 표시.
+  - `fmtQtyCell(first, last, final)` 함수 3인수 형식.
+- **결과 (005930 기준)**
+
+  | 전략 | 처음주식수 | 최종주식수 | 마지막가진주식수 |
+  |------|-----------|----------|----------------|
+  | type0_2 2000-2015 | 1,636 | 1,636 | 1,636 |
+  | type3 2000-2015 | 1,636 | 64,204 | 64,204 |
+  | type2_2_opt 2000-2015 | 2,178 | ~최대보유 | 0 (전량 매도) |
