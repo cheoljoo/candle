@@ -273,6 +273,13 @@ def render(cfg: config.Config, on_date: date,
     (out_dir / "compare.html").write_text(cmp_tpl.render(**common_ctx), encoding="utf-8")
     tprint(f"[dashboard] compare.html 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
+    # compare_full.html (내림 순위 전체 종목 상세)
+    tprint("[dashboard] compare_full.html 렌더...", flush=True)
+    t0 = time.perf_counter()
+    cmp_full_tpl = env.get_template("compare_full.html")
+    (out_dir / "compare_full.html").write_text(cmp_full_tpl.render(**common_ctx), encoding="utf-8")
+    tprint(f"[dashboard] compare_full.html 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
+
     # decisions.html
     tprint(f"[dashboard] decisions.html 렌더 ({len(decisions)}건)...", flush=True)
     t0 = time.perf_counter()

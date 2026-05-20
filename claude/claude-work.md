@@ -1260,3 +1260,25 @@
   | type0_2 2000-2015 | 1,636 | 1,636 | 1,636 |
   | type3 2000-2015 | 1,636 | 64,204 | 64,204 |
   | type2_2_opt 2000-2015 | 2,178 | ~최대보유 | 0 (전량 매도) |
+
+---
+
+## 2026-05-20 (2차 — compare Top 10% / 전체 종목 페이지 분리)
+
+### compare.html — "수익률 Top 10% 상세 내역" + compare_full.html 신규
+
+- **사용자 요청** : "내림 순위 전체 상세" → 상위 10%만 보여주는 페이지로 변경, 전체 목록은 별도 페이지로 분리. 제목 옆에 전체 페이지 링크 추가.
+- **compare.html 수정**
+  - 섹션 제목: `"📈 내림 순위 전체 상세"` → `"📈 수익률 Top 10% 상세 내역"`
+  - 그룹 테이블: Jinja2 `n_top10 = [[grp_data.group_size // 10, 1]|max, grp_data.group_size]|min` 계산 후 `tickers[:n_top10]` 슬라이스
+  - 헤더 표시: `"상위 N개 / 전체 M개 (Top 10%)"`
+  - 제목 옆 링크 버튼: `"📋 내림 순위 전체 종목 상세 →"` (`compare_full.html`)
+- **compare_full.html 신규 생성** (`src/candle/dashboard/templates/compare_full.html`)
+  - 기간 탭 + 전략 탭 (2단 탭 구조, compare.html과 동일)
+  - 전체 종목 수익률 내림차순 표시
+  - Top 10% 경계 행: 연초록 배경(`bg-emerald-50/30`) + ★ 뱃지 + 순위 초록색
+  - 우상단 복귀 버튼, 하단 Top 10% / 전체 요약
+  - max-height: 600px (compare.html 396px보다 넓게 설정)
+- **render.py 수정**
+  - `compare_full.html` 렌더링 추가 (compare.html 렌더 직후, 동일 common_ctx 사용)
+  - `_load_compare_top10()`에서 이미 전체 종목 데이터를 반환하므로 Python 측 추가 작업 없음

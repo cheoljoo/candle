@@ -195,11 +195,17 @@
     {% endif %}
   </section>
 
-  {# ── 내림 순위 전체 상세 ──────────────────────────────────────────── #}
+  {# ── 수익률 Top 10% 상세 내역 ──────────────────────────────────────── #}
   <section class="bg-white rounded-lg shadow-sm p-4"
            x-data="{ top10_tab: '{{ compare_period_list[0] if compare_period_list else '' }}' }">
-    <h2 class="text-base font-semibold mb-1">📈 내림 순위 전체 상세</h2>
-    <p class="text-xs text-slate-400 mb-3">그룹 내 전체 종목을 수익률 내림차순으로 표시합니다. 거래이력 버튼으로 해당 종목의 상세 거래를 확인하세요.</p>
+    <div class="flex items-center gap-3 mb-1">
+      <h2 class="text-base font-semibold">📈 수익률 Top 10% 상세 내역</h2>
+      <a href="compare_full.html"
+         class="text-xs px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded border border-slate-300 whitespace-nowrap">
+        📋 내림 순위 전체 종목 상세 →
+      </a>
+    </div>
+    <p class="text-xs text-slate-400 mb-3">그룹별 수익률 상위 10% 종목을 표시합니다. 전체 목록은 우측 링크에서 확인하세요.</p>
     {% if compare_period_list %}
     {# 1단계 탭: 기간 #}
     <div class="border-b mb-4 flex gap-1 flex-wrap text-sm">
@@ -231,9 +237,10 @@
           {% if grp_name in group_map %}{% set grp_data = group_map[grp_name] %}
           {% set hdr_cls = "bg-amber-50 border-b border-amber-100" if grp_name in ["ETF_KR", "ETF_US"] else "bg-sky-50 border-b border-sky-100" %}
           <div class="border border-slate-200 rounded-lg overflow-hidden">
+            {%- set n_top10 = [[grp_data.group_size // 10, 1] | max, grp_data.group_size] | min %}
             <div class="flex items-center justify-between px-3 py-2 {{ hdr_cls }}">
               <span class="font-semibold text-sm text-slate-800">{{ grp_name }}</span>
-              <span class="text-xs text-slate-500">전체 {{ grp_data.group_size }}개</span>
+              <span class="text-xs text-slate-500">상위 {{ n_top10 }}개 / 전체 {{ grp_data.group_size }}개 (Top 10%)</span>
             </div>
             <div class="overflow-x-auto max-h-96">
               <table class="min-w-full text-xs">
@@ -253,7 +260,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {% for row in grp_data.tickers %}
+                  {% for row in grp_data.tickers[:n_top10] %}
                   <tr class="border-t border-slate-100 hover:bg-slate-50">
                     <td class="px-2 py-1.5 text-right text-slate-400 tabular-nums">{{ row.rank }}</td>
                     <td class="px-2 py-1.5 font-mono text-slate-700">{{ row.ticker }}</td>

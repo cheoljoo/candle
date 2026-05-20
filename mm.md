@@ -1,13 +1,18 @@
-feat: add type0_2 buy-and-hold + type2_2_opt per-ticker optimized
+feat: compare Top10%/전체분리 + 문서 19차 업데이트 (2026-05-20)
 
-- backtest/type0_2.py 신규: 첫 거래일 전액매수 후 보유, 매도 없음 (벤치마크)
-- backtest/type2_2_opt.py 신규: type2_2 로직 + 종목별 최적화 plus/minus_days 사용
-- backtest/run.py: _opt_params.json으로 파라미터 변경 감지 (변경 시 full 재계산)
-  · _load_opt_params_current(): per_ticker/_summary.json → fallback=strategies.yml
-  · _dispatch()/resume(): type0_2 + type2_2_opt 케이스 추가
-- config/strategies.yml: type0_2·type2_2_opt 항목 + enabled_types에 추가
-  · type2_2_opt fallback_plus_days=33, fallback_minus_days=5
-- src/candle/config.py: ALL_TYPES 튜플에 type0_2·type2_2_opt 추가
-- src/candle/backtest/__init__.py: 신규 모듈 import + ALL_TYPES 갱신
-- claude-opus-4-7_guide.md: 17차 업데이트 (backtest 구조, optimize 섹션)
+## compare.html — 수익률 Top 10% 상세 내역으로 개편
+- 제목: "내림 순위 전체 상세" → "📈 수익률 Top 10% 상세 내역"
+- 각 그룹 테이블: `max(group_size // 10, 1)`개만 표시 (전체 대신 상위 10%)
+- 헤더: "상위 N개 / 전체 M개 (Top 10%)" 표시
+- 제목 옆 "📋 내림 순위 전체 종목 상세 →" 링크 추가 (compare_full.html)
 
+## compare_full.html — 전체 종목 내림차순 페이지 신규
+- 기간×전략 2단 탭 구조 (compare.html과 동일)
+- 전체 종목 수익률 내림차순, Top 10% 구간 ★ 뱃지·연초록 배경 강조
+- 우상단 "← 전략별 요약 (Top 10%)" 복귀 버튼
+- render.py에 compare_full.html 렌더링 추가
+
+## 문서 업데이트 (19차)
+- claude-opus-4-7_guide.md: 19차 헤더 + compare_full.html 섹션 추가
+  대시보드 파일 목록에 compare_full.html 추가
+- claude-work.md: 2026-05-20 2차 작업 로그 추가
