@@ -20,7 +20,14 @@ from ..storage import csv_io, paths
 
 log = logging.getLogger(__name__)
 
-CASH_TRACKING_TYPES = {"type1_2", "type2_2", "type2_2b", "type2_2_opt", "type3"}
+CASH_TRACKING_TYPES = {
+    "type0_2",
+    "type1_2",
+    "type2_2", "type2_2b", "type2_2_opt", "type2_2_opt_v",
+    "type3",
+    "type4_boost", "type3_im_boost", "type4_boost_opt", "type3_im_boost_opt",
+    "type5_dd",
+}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 리스크 지표 헬퍼
@@ -297,6 +304,11 @@ def _strategy_summary(cfg: config.Config, summary_df: pd.DataFrame,
             base_unit = float(initial_cap[currency])
             if type_name == "type3":
                 initial_capital = base_unit * float(grp["buy_count"].sum())
+            elif type_name in {"type4_boost", "type3_im_boost", "type4_boost_opt", "type3_im_boost_opt"}:
+                t = cfg.strategies.get(type_name, {})
+                cur_key = "KRW" if currency == "KRW" else "USD"
+                base_amount = float(t.get("base_amount", {}).get(cur_key, 1_000_000 if currency == "KRW" else 100))
+                initial_capital = base_amount * float(grp["buy_count"].sum())
             else:
                 initial_capital = base_unit * n_tickers
             pnl = total_asset - initial_capital

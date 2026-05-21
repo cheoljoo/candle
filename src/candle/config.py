@@ -26,21 +26,19 @@ class Config:
     recipients: dict[str, Any]
     periods: dict[str, Any] = None  # type: ignore[assignment]
 
-    # 모든 type 고정 순서 (순서 변경 금지)
-    ALL_TYPES: tuple[str, ...] = (
-        "type0_2",
-        "type1_1", "type1_2",
-        "type2_1", "type2_2",
-        "type2_1b", "type2_2b",
-        "type2_2_opt",
-        "type3",
-    )
+    @property
+    def ALL_TYPES(self) -> tuple[str, ...]:
+        """strategies.yml에서 'type'으로 시작하는 모든 키 (YAML 정의 순서 유지).
+
+        새 type 추가 시 strategies.yml에 항목을 추가하기만 하면 자동 반영됨.
+        """
+        return tuple(k for k in self.strategies if k.startswith("type"))
 
     @property
     def enabled_types(self) -> list[str]:
         """config/strategies.yml의 enabled_types에 정의된 활성 type 목록.
 
-        enabled_types 항목이 없으면 전체 7개 활성 (하위호환).
+        enabled_types 항목이 없으면 ALL_TYPES 전체 활성 (하위호환).
         순서는 ALL_TYPES 정의 순서를 따름.
         """
         raw = self.strategies.get("enabled_types")

@@ -281,7 +281,16 @@
         const same = (lastBuy === final);
         const finalPart = (!same && final != null)
           ? `<span class="text-slate-400 text-[10px] ml-0.5">(${final.toLocaleString('ko-KR')})</span>` : '';
-        return `<span class="${fCls}">${fStr}</span><span class="text-slate-300 mx-1">→</span><span class="${lCls}">${lStr}</span>${finalPart}`;
+        // percentage change from first to final (or lastBuy if final is null)
+        const compareQty = final != null ? final : lastBuy;
+        let pctPart = '';
+        if (first != null && compareQty != null && first !== 0) {
+          const pct = (compareQty - first) / first * 100;
+          const pctCls = pct > 0 ? 'text-emerald-600' : pct < 0 ? 'text-rose-600' : 'text-slate-400';
+          const pctSign = pct >= 0 ? '+' : '';
+          pctPart = ` <span class="${pctCls} text-[10px] font-semibold">(${pctSign}${pct.toFixed(1)}%)</span>`;
+        }
+        return `<span class="${fCls}">${fStr}</span><span class="text-slate-300 mx-1">→</span><span class="${lCls}">${lStr}</span>${finalPart}${pctPart}`;
       }
       const periodQtyHeaders = periodList.map(p =>
         `<th class="text-right px-3 py-2 whitespace-nowrap font-normal text-slate-600">${p}</th>`
@@ -337,9 +346,11 @@
         const bsRetCls = (t.side === 'sell' && bsRet != null)
           ? (parseFloat(bsRet) >= 0 ? 'text-red-700 font-bold' : 'text-blue-700 font-bold')
           : 'text-slate-300';
+        const reasonCls = t.side === 'buy' ? 'text-emerald-700' : t.side === 'sell' ? 'text-rose-700' : 'text-slate-400';
         return `<tr class="border-t hover:bg-slate-50">
           <td class="px-3 py-1.5 font-mono text-xs">${t.date}</td>
           <td class="px-3 py-1.5 text-xs ${sideCls}">${t.side}</td>
+          <td class="px-3 py-1.5 text-xs ${reasonCls} whitespace-nowrap">${t.reason || '—'}</td>
           <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.price)}</td>
           <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.qty)}</td>
           <td class="px-3 py-1.5 text-right tabular-nums text-xs">${fmtNum(t.amount)}</td>
@@ -380,6 +391,7 @@
                 <tr>
                   <th class="text-left px-3 py-2">날짜</th>
                   <th class="text-left px-3 py-2">구분</th>
+                  <th class="text-left px-3 py-2">결정 사유</th>
                   <th class="text-right px-3 py-2">가격</th>
                   <th class="text-right px-3 py-2">수량</th>
                   <th class="text-right px-3 py-2">금액</th>

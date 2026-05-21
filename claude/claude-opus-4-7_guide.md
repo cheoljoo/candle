@@ -1,13 +1,13 @@
 ---
 model: claude-opus-4-7
-date: 2026-05-20 (19차)
+date: 2026-05-21 (21차)
 source: req.md + claude-work.md
 purpose: 구현 완료 상태 기준 현행화 — 계획(plan) + 실제 동작 구조
 ---
 
 # Candle Backtest Program — 진행 가이드 (claude-opus-4-7)
 
-> **2026-05-20 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(KR+US) 대시보드 추가. Makefile KR/US 분리 파이프라인. 리스크 지표(MDD·승률·평균보유일) + 거래 이력 상세 페이지 + 미국 시장 시그널(VIX·수익률 곡선) + KOSPI200 외국인/기관 매매 추가. Worker CPU×1/2 기본값. enabled_types ON/OFF 뱃지. market calendar 수집. decisions 신호 확인일(마지막 거래일) 표시. ticker str 강제화. market_calendar 기반 비거래일 decisions 검증 가드. 변곡점 테이블 날짜 컬럼 추가. decisions 백테스트 action 비교 컬럼 + enabled_types 필터. decisions 직전날짜 prev_action 비교(신호변화 감지, buy=빨강/sell=파랑). 거래이력 #TICKER:type_name URL hash 지원. backtest Buy-Sell 수익률(사이클별 수익률) 컬럼 추가 — ticker_trades.html 이익=빨강/손실=파랑. 거래이력 Chart.js 차트(종가·10월MA·매수↑/매도↓마커·보유수량) + 전략 설명·ON/OFF 뱃지 + 1년 구간 + ON 전략만 차트 표시. backtest 기간 config화(config/periods.yml) + candle backtest-all 커맨드(병렬 ProcessPoolExecutor, workers 설정 3단계 우선순위). analyze ValueError 버그 수정(_STRING_COLS 하드코딩). 대시보드 테이블 전체 컬럼 정렬(data-sortable + _nav.html 공유 JS). compare 전략명 항상 표시 + strategy_summary.csv KR/US 병합 저장. instruments.csv 미등록 ticker 필터링(UNKNOWN 그룹 제거). compare 상위 10% 섹션 전면 개편(2단 탭 기간×전략 + 2×2 그룹 그리드 + 매수/매도/보유일/RANK 컬럼). 거래이력 차트 평가액+현금(주식수×종가+현금) equity 라인 추가 + 차트 축 색상(yPrice=slate/yQty=green/yEquity=indigo). type0_2(매수후보유 벤치마크) + type2_2_opt(종목별 최적화 파라미터 type2_2) 신규 추가. 주식수 3개 개념 분리 — 처음주식수(첫BUY qty)·최종주식수(마지막BUY holding_qty)·마지막가진주식수(SELL 후 실제보유) + compare/거래이력 표시 개선. compare 전략별 요약 Top 10%/전체 분리 — compare.html은 수익률 상위 10% 표시, compare_full.html(신규)은 전체 종목 내림차순 표시.**
+> **2026-05-21 현재 Phase 1~6 전체 구현 완료. gmail-etf 기능 추가. 전체 4개 그룹 종목별 per-ticker 최적화 지원. 시장 시그널(KR+US) 대시보드 추가. Makefile KR/US 분리 파이프라인. 리스크 지표(MDD·승률·평균보유일) + 거래 이력 상세 페이지 + 미국 시장 시그널(VIX·수익률 곡선) + KOSPI200 외국인/기관 매매 추가. Worker CPU×1/2 기본값. enabled_types ON/OFF 뱃지. market calendar 수집. decisions 신호 확인일(마지막 거래일) 표시. ticker str 강제화. market_calendar 기반 비거래일 decisions 검증 가드. 변곡점 테이블 날짜 컬럼 추가. decisions 백테스트 action 비교 컬럼 + enabled_types 필터. decisions 직전날짜 prev_action 비교(신호변화 감지, buy=빨강/sell=파랑). 거래이력 #TICKER:type_name URL hash 지원. backtest Buy-Sell 수익률(사이클별 수익률) 컬럼 추가 — ticker_trades.html 이익=빨강/손실=파랑. 거래이력 Chart.js 차트(종가·10월MA·매수↑/매도↓마커·보유수량) + 전략 설명·ON/OFF 뱃지 + 1년 구간 + ON 전략만 차트 표시. backtest 기간 config화(config/periods.yml) + candle backtest-all 커맨드(병렬 ProcessPoolExecutor, workers 설정 3단계 우선순위). analyze ValueError 버그 수정(_STRING_COLS 하드코딩). 대시보드 테이블 전체 컬럼 정렬(data-sortable + _nav.html 공유 JS). compare 전략명 항상 표시 + strategy_summary.csv KR/US 병합 저장. instruments.csv 미등록 ticker 필터링(UNKNOWN 그룹 제거). compare 상위 10% 섹션 전면 개편(2단 탭 기간×전략 + 2×2 그룹 그리드 + 매수/매도/보유일/RANK 컬럼). 거래이력 차트 평가액+현금(주식수×종가+현금) equity 라인 추가 + 차트 축 색상(yPrice=slate/yQty=green/yEquity=indigo). type0_2(매수후보유 벤치마크) + type2_2_opt(종목별 최적화 파라미터 type2_2) 신규 추가. 주식수 3개 개념 분리 — 처음주식수(첫BUY qty)·최종주식수(마지막BUY holding_qty)·마지막가진주식수(SELL 후 실제보유) + compare/거래이력 표시 개선. compare 전략별 요약 Top 10%/전체 분리 — compare.html은 수익률 상위 10% 표시, compare_full.html(신규)은 전체 종목 내림차순 표시. 신규 6종 전략 추가 — type4_boost(DCA+변곡부스트+부분매도), type3_im_boost(DCA+변곡부스트+매도없음+alpha할인), type4_boost_opt(streak 버전), type3_im_boost_opt(streak 버전), type5_dd(전액매수+drawdown분할매도), type2_2_opt_v(최적streak±30% variant band). DCA 증분 처리 완전 지원(last_dca_date/last_sell_price/last_sell_inflection_price 복원). ALL_TYPES·type_descriptions·simulate신호 완전 config-driven(strategies.yml 추가만으로 자동반영). CASH_TRACKING_TYPES 버그수정(type2_2_opt_v 등 7종 추가). backtest/compare KR/US 분리실행시 _all.csv merge 버그수정. 거래이력 결정사유(reason) 컬럼 추가(backtest 13종 type + dashboard). 전략별요약 탭구조 변경(1탭:기간→2탭:그룹→테이블:전략) + 전략명 정렬. 주식수 % 변화표시.**
 > 이 문서는 최초 계획(req.md 기반)을 실제 구현 결과로 업데이트한 **현행 아키텍처 레퍼런스**입니다.
 > 변경 이력은 `claude-work.md` 를 참고하세요.
 
@@ -299,8 +299,19 @@ _fetch_us_batch():
 - `type1_1/2`, `type2_1/2`, `type3`: `portfolio=` 파라미터 (resume 지원)
 - `type2_1.py`: `_init_streak()` — resume 시 streak 상태 lookback으로 초기화
 - `type2_2_opt.py`: **신규** — type2_2 동일 로직, 종목별 최적화 파라미터 사용 (`type_name='type2_2_opt'`)
+- `type4_boost.py`: **신규** — DCA(90일) + -→+ 변곡 × inflection_boost 추가 매수 + +→- 변곡 30% 부분매도. price_guard: 직전 매도가 × 1.10 이상이면 재매수 억제
+- `type3_im_boost.py`: **신규** — DCA + -→+ 변곡 × (inflection_boost + alpha × discount_ratio) 추가 매수. 매도 없음. +→- 변곡 시 last_sell_inflection_price 갱신만
+- `type4_boost_opt.py`: **신규** — type4_boost의 streak 신호 버전 (최적화 파라미터 사용)
+- `type3_im_boost_opt.py`: **신규** — type3_im_boost의 streak 신호 버전
+- `type5_dd.py`: **신규** — -→+ 변곡 전액 매수(rebuy_price_guard), +→- 무시. 고점(high_watermark) 대비 drawdown 1차(dd_first=15%) 50% 매도 / 2차(dd_second=25%) 30% 추가 매도
+- `type2_2_opt_v.py`: **신규** — streak_len이 [opt_days×(1-vp), opt_days×(1+vp)] 밴드 진입 첫 날 거래 (±30% variant 허용). type2_2_opt 대비 거래 빈도 높음
 - `run.py`: **`_meta.csv` 기반 증분** + 진행률 출력 (항상)
   - `type2_2_opt` 전용: `_opt_params.json` 저장/로드, 파라미터 변경 시 강제 full 재계산
+  - DCA 타입(type4_boost/type3_im_boost/type4_boost_opt/type3_im_boost_opt) 증분: `last_dca_date` = max(buy_date), `last_sell_price`/`last_sell_inflection_price` = daily 역방향 스캔으로 복원
+  - `_FULL_RECOMPUTE_TYPES = frozenset()` — 강제 재계산 없음 (성능 최적화)
+  - **`_all.csv` / `_summary.csv` KR/US merge** (2026-05-21): `--market kr` 후 `--market us` 실행 시 기존 다른 마켓 ticker 행 보존. 덮어쓰기 버그 수정
+- `base.py` **`reason` 컬럼** (2026-05-21): `TRADE_COLUMNS`에 `"reason"` 추가. `buy(reason=)` / `sell(reason=)` 파라미터. 신호 발생 이유 CSV 기록
+  - 예: `"MA10M 변곡 -→+"` / `"+8일 연속 유지"` / `"DCA 90일 주기"` / `"Drawdown -16.3% (≥15%) 1차 50% 매도"`
 
 **backtest 증분 모드:**
 
@@ -379,9 +390,16 @@ type2_1b:
 - **strategy_summary 구조** (2026-05-10 개편): `(type, group_name)` 별 행 + `TOTAL (KRW/USD)` 행
   - 컬럼: `strategy, group, currency, tickers, 총자산, 현금, 보유주식수, 초기자본, 손익, 수익률, 매수횟수, 매도횟수`
   - `group` 값: `KOSPI200` / `SP500` / `ETF_KR` / `ETF_US` / `TOTAL (KRW)` / `TOTAL (USD)`
+- **`CASH_TRACKING_TYPES`** (2026-05-21 수정): 전액매수/전량매도 type에만 `초기자본 = base_unit × n_tickers` 적용. 누락 type 추가:
+  `type0_2`, `type2_2_opt_v`, `type5_dd`, `type4_boost`, `type3_im_boost`, `type4_boost_opt`, `type3_im_boost_opt`
+  DCA boost type: `initial_capital = base_amount × buy_count` (별도 분기)
 
 ### ✅ Phase 5 — Simulate + Dashboard
-- `simulate/engine.py`: rule×5type + AI + manual → decisions.csv
+- `simulate/engine.py`: rule×15type + AI + manual → decisions.csv
+  - **config-driven 신호** (2026-05-21): `_rule_signal()` if/elif 제거 → `strategies.yml`의 `simulate:{signal,sell}` 읽어 처리
+    - `signal: inflection` — MA10M 변곡점 기반 / `signal: streak` — 연속일수 기반
+    - `signal: streak_variant` — ±variant_percent 밴드 / `signal: dca` — 항상 buy / `signal: hold` — 신호 없음
+  - **`_rule_qty()`**: `strategies.yml`의 `qty` 필드만 읽어 반환 (없으면 None = 전액/전량)
 - `simulate/ai_advisor.py`: Claude Opus 4.7 + prompt caching (system+종목메타 cached, 오늘 신호 uncached)
 - `dashboard/render.py`:
   - `_load_compare_all()`: 모든 label 디렉터리 스캔 → {period: rows}
@@ -401,7 +419,7 @@ type2_1b:
 | `sp500.html` | S&P500 종목 × 기간 수익률 (RANK 포함) |
 | `etf_kr.html` | ETF_KR 종목 × 기간 수익률 |
 | `etf_us.html` | ETF_US 종목 × 기간 수익률 |
-| `compare.html` | 전략×그룹별 요약 (period 탭, TOTAL 행 포함) |
+| `compare.html` | 전략별 요약 — **1탭:기간, 2탭:그룹, 테이블:전략(전략명 정렬)** (2026-05-21 탭 구조 변경) |
 | `decisions.html` | 오늘의 의사결정 (RANK 컬럼, rule/AI/manual + type 필터) |
 | `docs.html` | 문서 뷰어 (claude/ *.md 자동 수집, Markdown/Raw 토글) |
 | `optimize.html` | type2 파라미터 최적화 결과 (그룹 탭 + 히트맵 + 실행 메타 + ETF 종목별) |
@@ -424,11 +442,32 @@ type2_1b:
     - 종목 클릭 → 개별 히트맵 + 전체 조합 결과 테이블 (정렬·CSV 다운로드)
     - "← 목록으로" 버튼으로 복귀. 그룹 탭 전환 시 선택 ticker 초기화
 - **CSV 다운로드** (`_download.html`): compare / decisions / group_returns / optimize 모두 지원
+- **`_type_legend.html`** (2026-05-21): type 코드 스팬 `w-16`(64px) → `w-40`(160px). `type3_im_boost_opt` 등 긴 이름 겹침 방지
+- **`ticker_trades.html`** 거래 이력 개선 (2026-05-21):
+  - `"결정 사유"` 컬럼 추가: backtest `reason` 필드 표시 (buy=초록, sell=빨강)
+  - 기간별 주식수 `fmtQtyCell()`: `(±N.N%)` 변화율 색상 표시 (증가=초록, 감소=빨강)
 
 ### ✅ Phase 6 — 자동화
 - `Makefile` `v2-all` 전체 파이프라인
 - `DEBUG` 변수로 debug 모드 제어: `make v2-all DEBUG=--debug`
 - cron 설정: runtime.yml 참고
+
+### ✅ Config-driven 자동화 (2026-05-21)
+
+새 backtest type 추가 시 수정 파일을 최소화하기 위한 구조:
+
+| 항목 | 변경 전 | 변경 후 |
+|------|---------|---------|
+| `ALL_TYPES` | `config.py` 하드코딩 tuple | `strategies.yml` YAML 키 자동 파생 (`@property`) |
+| `type_descriptions` | `render.py` 하드코딩 dict | `strategies.yml` `short_desc`/`description` 자동 읽기 |
+| simulate 신호 | `engine.py` if/elif per-type | `strategies.yml` `simulate:{signal,sell}` 공통 로직 |
+
+**새 type 추가 시 수정 파일:**
+1. `config/strategies.yml` — type 섹션 + `enabled_types` (필수)
+2. `src/candle/backtest/type_XXX.py` — 거래 로직 (필수)
+3. `src/candle/backtest/__init__.py` — `from . import type_XXX` (누락 시 import 에러로 즉시 감지)
+4. `src/candle/backtest/run.py` — `_dispatch()` 케이스 (필수)
+5. `src/candle/simulate/engine.py` — **수정 불필요** (strategies.yml simulate 섹션으로 자동 처리)
 
 ---
 

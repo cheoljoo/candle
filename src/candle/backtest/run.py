@@ -320,10 +320,27 @@ def run(cfg: config.Config, type_names: list[str], market: str,
             if i % _progress_step == 0 or i == total:
                 _print_progress(_label, type_name, i, total, len(per_ticker_summary), type_t0)
 
-        if all_trades:
-            csv_io.atomic_write(pd.concat(all_trades, ignore_index=True), out_dir / "_all.csv")
-        if per_ticker_summary:
-            csv_io.atomic_write(pd.DataFrame(per_ticker_summary), out_dir / "_summary.csv")
+        processed_tickers = {str(r["ticker"]) for r in per_ticker_summary}
+
+        all_path = out_dir / "_all.csv"
+        new_all = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
+        if all_path.exists():
+            existing_all = csv_io.read(all_path)
+            if not existing_all.empty:
+                other = existing_all[~existing_all["ticker"].astype(str).isin(processed_tickers)]
+                new_all = pd.concat([other, new_all], ignore_index=True)
+        if not new_all.empty:
+            csv_io.atomic_write(new_all, all_path)
+
+        summary_path = out_dir / "_summary.csv"
+        new_summary = pd.DataFrame(per_ticker_summary)
+        if summary_path.exists():
+            existing_summary = csv_io.read(summary_path)
+            if not existing_summary.empty:
+                other_s = existing_summary[~existing_summary["ticker"].astype(str).isin(processed_tickers)]
+                new_summary = pd.concat([other_s, new_summary], ignore_index=True)
+        if not new_summary.empty:
+            csv_io.atomic_write(new_summary, summary_path)
         # type2_2_opt: 사용한 파라미터 저장 (다음 실행 시 변경 감지에 사용)
         if type_name == "type2_2_opt" and updated_opt_params:
             _save_opt_params_used(out_dir, updated_opt_params)

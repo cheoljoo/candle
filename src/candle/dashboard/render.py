@@ -195,16 +195,14 @@ def render(cfg: config.Config, on_date: date,
     env.filters["uk_fmt"] = _uk_fmt
     env.filters["dow_fmt"] = _dow_fmt
 
-    # 전략 type 이름 설명 (모든 페이지 공통)
-    type_descriptions = {
-        "type1_1":  ("변곡점 신호 · 고정수량 매수·매도",      "MA10M 교차(-→+) 매수 / (+→-) 매도, 10주 고정"),
-        "type1_2":  ("변곡점 신호 · 전액매수·전량매도",    "MA10M 교차(-→+) 전액 매수 / (+→-) 전량 매도"),
-        "type2_1":  ("연속일수(8/4) · 고정수량 매수·매도",  "+8일 연속 → 매수(10주 고정) / -4일 연속 → 매도(10주 고정)"),
-        "type2_2":  ("연속일수(8/4) · 전액매수·전량매도",   "+8일 연속 → 전액 매수 / -4일 연속 → 전량 매도"),
-        "type2_1b": ("연속일수(33/5) · 고정수량 매수·매도", "+33일 연속 → 매수(10주 고정) / -5일 연속 → 매도(10주 고정)"),
-        "type2_2b": ("연속일수(33/5) · 전액매수·전량매도",  "+33일 연속 → 전액 매수 / -5일 연속 → 전량 매도"),
-        "type3":    ("적립식 90일 주기",             "90일마다 일정 금액 입금 후 전액 매수 (매도 없음)"),
-    }
+    # 전략 type 이름 설명 — config/strategies.yml 의 short_desc / description 필드 기반으로 동적 생성.
+    # 새 type 추가 시: strategies.yml 에 short_desc + description 만 추가하면 자동 반영됨.
+    type_descriptions: dict[str, tuple[str, str]] = {}
+    for tname in cfg.ALL_TYPES:
+        s = cfg.strategies.get(tname, {})
+        short = str(s.get("short_desc") or tname)
+        detail = str(s.get("description") or "")
+        type_descriptions[tname] = (short, detail)
 
     common_ctx = dict(
         as_of=actual_date,
@@ -1257,7 +1255,7 @@ def _generate_trade_jsons(cfg: config.Config, out_dir: Path) -> int:
                 tk = tk.zfill(6)
             cols = ["date", "side", "price", "qty", "amount",
                     "holding_qty", "holding_value", "cash", "return_pct",
-                    "buy_sell_return_pct"]
+                    "buy_sell_return_pct", "reason"]
             cols = [c for c in cols if c in grp.columns]
             records = grp[cols].fillna("").to_dict(orient="records")
             # None/NaN 정리

@@ -93,100 +93,96 @@
     </div>
   </details>
 
-  {# ── 전략별 요약 (기간 탭) ──────────────────────────────── #}
+  {# ── 전략별 요약 (기간 탭 → 그룹 탭 → 전략 테이블) ──────────────────── #}
+  {# comparePeriodData: { period: [row, ...] } — Jinja2 에서 JS 변수로 직렬화 #}
+  <script>
+    const comparePeriodData = {{ compare_all | tojson }};
+  </script>
   <section class="bg-white rounded-lg shadow-sm p-4"
-           x-data="{ cmp_tab: '{{ compare_period_list[0] if compare_period_list else '' }}' }">
+           x-data="{
+             cmp_tab: '{{ compare_period_list[0] if compare_period_list else '' }}',
+             cmp_grp: '',
+             get groups() {
+               const rows = comparePeriodData[this.cmp_tab] || [];
+               const seen = new Set();
+               const order = ['KOSPI200', 'SP500', 'ETF_KR', 'ETF_US', 'TOTAL (KRW)', 'TOTAL (USD)'];
+               return order.filter(g => rows.some(r => r.group === g));
+             },
+             get filteredRows() {
+               const rows = comparePeriodData[this.cmp_tab] || [];
+               const grp = this.cmp_grp || (this.groups[0] || '');
+               return rows
+                 .filter(r => r.group === grp)
+                 .slice()
+                 .sort((a, b) => a.strategy.localeCompare(b.strategy));
+             },
+             activeGroup() { return this.cmp_grp || (this.groups[0] || ''); }
+           }"
+           x-init="cmp_grp = groups[0] || ''">
     <h2 class="text-base font-semibold mb-1">전략별 요약 (compare)</h2>
     {% if compare_period_list %}
-    {# 기간 탭 #}
+    {# 1단계 탭: 기간 #}
     <div class="border-b mb-3 flex gap-1 flex-wrap text-sm">
       {% for p in compare_period_list %}
-      <button @click="cmp_tab='{{ p }}'"
+      <button @click="cmp_tab='{{ p }}'; cmp_grp = groups[0] || ''"
               :class="cmp_tab==='{{ p }}' ? 'border-b-2 border-slate-800 font-semibold' : 'text-slate-500'"
               class="px-3 py-2 whitespace-nowrap">{{ p }}</button>
       {% endfor %}
     </div>
-    {# 탭 내용 #}
-    {% for period, rows in compare_all.items() %}
-    <div x-show="cmp_tab==='{{ period }}'">
-      <div class="flex justify-end mb-2">
-        <button onclick="downloadTableCSV('cmp-tbl-{{ loop.index }}', 'strategy_summary_{{ period }}.csv')"
-                class="text-xs px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded border border-slate-300 text-slate-600">
-          ⬇ CSV 다운로드
-        </button>
-      </div>
-      <div class="overflow-x-auto">
-        <table id="cmp-tbl-{{ loop.index }}" class="min-w-full text-sm" data-sortable>
-          <thead class="bg-slate-100 text-slate-600 text-xs">
-            <tr>
-              <th class="text-left px-3 py-2">전략</th>
-              <th class="text-left px-3 py-2">그룹</th>
-              <th class="text-right px-3 py-2">종목수</th>
-              <th class="text-right px-3 py-2">총자산</th>
-              <th class="text-right px-3 py-2">초기자본</th>
-              <th class="text-right px-3 py-2">손익</th>
-              <th class="text-right px-3 py-2">수익률 (%)</th>
-              <th class="text-right px-3 py-2">매수</th>
-              <th class="text-right px-3 py-2">매도</th>
-              <th class="text-right px-3 py-2 text-amber-700" title="평균 최대낙폭">MDD (%)</th>
-              <th class="text-right px-3 py-2 text-sky-700" title="평균 승률 (sell 시 매입가 대비 수익)">승률 (%)</th>
-              <th class="text-right px-3 py-2 text-slate-500" title="평균 보유일 (매수→매도)">보유일</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% set ns = namespace(prev_strategy='') %}
-            {% for r in rows %}
-            {% set grp_val = r.get('group', r.get('currency', '')) %}
-            {% set is_total = grp_val.startswith('TOTAL') %}
-            {% set strategy_changed = ns.prev_strategy != r.strategy %}
-            {% set ns.prev_strategy = r.strategy %}
-            <tr class="border-t
-              {% if is_total %}bg-slate-50 font-semibold{% endif %}
-              {% if strategy_changed and not loop.first %}border-t-2 border-slate-300{% endif %}
-              {% if not is_total %}hover:bg-slate-50{% endif %}">
-              <td class="px-3 py-2 font-medium">{{ r.strategy }}</td>
-              <td class="px-3 py-2
-                {% if is_total %}text-slate-500 italic{% endif %}">
-                {{ grp_val }}
-              </td>
-              <td class="px-3 py-2 text-right tabular-nums text-slate-500">{{ r.get('tickers', '') }}</td>
-              <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.0f}".format(r["총자산"]) }}</td>
-              <td class="px-3 py-2 text-right tabular-nums">{{ "{:,.0f}".format(r["초기자본"]) }}</td>
-              <td class="px-3 py-2 text-right tabular-nums {% if r['손익'] >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">
-                {{ "{:,.0f}".format(r["손익"]) }}
-              </td>
-              <td class="px-3 py-2 text-right tabular-nums
-                {% if r['수익률'] >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}
-                {% if is_total %}text-base{% endif %}">
-                {{ "%.2f"|format(r["수익률"]) }}%
-              </td>
-              <td class="px-3 py-2 text-right">{{ r["매수횟수"] }}</td>
-              <td class="px-3 py-2 text-right">{{ r["매도횟수"] }}</td>
-              {# MDD: 낮을수록 좋음 (초록), 높을수록 나쁨 (빨강) #}
-              {% set mdd = r.get('avg_mdd') %}
-              <td class="px-3 py-2 text-right tabular-nums
-                {% if mdd is not none %}{% if mdd <= 10 %}text-emerald-600{% elif mdd <= 25 %}text-amber-600{% else %}text-rose-700{% endif %}{% else %}text-slate-300{% endif %}">
-                {% if mdd is not none %}{{ "%.1f"|format(mdd) }}%{% else %}—{% endif %}
-              </td>
-              {# 승률: 높을수록 좋음 #}
-              {% set wr = r.get('avg_win_rate') %}
-              <td class="px-3 py-2 text-right tabular-nums
-                {% if wr is not none %}{% if wr >= 60 %}text-emerald-600{% elif wr >= 40 %}text-amber-600{% else %}text-rose-700{% endif %}{% else %}text-slate-300{% endif %}">
-                {% if wr is not none %}{{ "%.1f"|format(wr) }}%{% else %}—{% endif %}
-              </td>
-              {# 평균 보유일 #}
-              {% set ah = r.get('avg_hold_days') %}
-              <td class="px-3 py-2 text-right tabular-nums text-slate-500">
-                {% if ah is not none %}{{ ah|int }}일{% else %}—{% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-
+    {# 2단계 탭: 그룹 #}
+    <div class="flex gap-1 flex-wrap mb-4 bg-slate-100 rounded-lg p-1">
+      <template x-for="g in groups" :key="g">
+        <button @click="cmp_grp = g"
+                :class="activeGroup() === g ? 'bg-white shadow-sm text-indigo-700 font-semibold' : 'text-slate-500 hover:text-slate-700'"
+                class="px-4 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors"
+                x-text="g"></button>
+      </template>
     </div>
-    {% endfor %}
+    {# 테이블: 해당 기간+그룹의 전략 목록 (수익률 내림차순) #}
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm" data-sortable>
+        <thead class="bg-slate-100 text-slate-600 text-xs">
+          <tr>
+            <th class="text-left px-3 py-2">전략</th>
+            <th class="text-right px-3 py-2">종목수</th>
+            <th class="text-right px-3 py-2">수익률 (%)</th>
+            <th class="text-right px-3 py-2">손익</th>
+            <th class="text-right px-3 py-2">초기자본</th>
+            <th class="text-right px-3 py-2">매수</th>
+            <th class="text-right px-3 py-2">매도</th>
+            <th class="text-right px-3 py-2 text-amber-700" title="평균 최대낙폭">MDD (%)</th>
+            <th class="text-right px-3 py-2 text-sky-700" title="평균 승률 (sell 시 매입가 대비 수익)">승률 (%)</th>
+            <th class="text-right px-3 py-2 text-slate-500" title="평균 보유일 (매수→매도)">보유일</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="r in filteredRows" :key="r.strategy">
+            <tr class="border-t hover:bg-slate-50">
+              <td class="px-3 py-2 font-medium" x-text="r.strategy"></td>
+              <td class="px-3 py-2 text-right tabular-nums text-slate-500" x-text="r.tickers ?? ''"></td>
+              <td class="px-3 py-2 text-right tabular-nums font-semibold"
+                  :class="r['수익률'] >= 0 ? 'text-emerald-700' : 'text-rose-700'"
+                  x-text="(r['수익률'] != null ? r['수익률'].toFixed(2) + '%' : '—')"></td>
+              <td class="px-3 py-2 text-right tabular-nums"
+                  :class="r['손익'] >= 0 ? 'text-emerald-700' : 'text-rose-700'"
+                  x-text="r['손익'] != null ? r['손익'].toLocaleString('ko-KR', {maximumFractionDigits:0}) : '—'"></td>
+              <td class="px-3 py-2 text-right tabular-nums"
+                  x-text="r['초기자본'] != null ? r['초기자본'].toLocaleString('ko-KR', {maximumFractionDigits:0}) : '—'"></td>
+              <td class="px-3 py-2 text-right" x-text="r['매수횟수'] ?? '—'"></td>
+              <td class="px-3 py-2 text-right" x-text="r['매도횟수'] ?? '—'"></td>
+              <td class="px-3 py-2 text-right tabular-nums"
+                  :class="r.avg_mdd == null ? 'text-slate-300' : r.avg_mdd <= 10 ? 'text-emerald-600' : r.avg_mdd <= 25 ? 'text-amber-600' : 'text-rose-700'"
+                  x-text="r.avg_mdd != null ? r.avg_mdd.toFixed(1) + '%' : '—'"></td>
+              <td class="px-3 py-2 text-right tabular-nums"
+                  :class="r.avg_win_rate == null ? 'text-slate-300' : r.avg_win_rate >= 60 ? 'text-emerald-600' : r.avg_win_rate >= 40 ? 'text-amber-600' : 'text-rose-700'"
+                  x-text="r.avg_win_rate != null ? r.avg_win_rate.toFixed(1) + '%' : '—'"></td>
+              <td class="px-3 py-2 text-right tabular-nums text-slate-500"
+                  x-text="r.avg_hold_days != null ? Math.round(r.avg_hold_days) + '일' : '—'"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
     {% else %}
       <p class="text-sm text-slate-500">
         compare 결과가 없습니다.

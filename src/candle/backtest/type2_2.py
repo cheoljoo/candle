@@ -39,10 +39,10 @@ def run_one(ticker: str, daily: pd.DataFrame, initial_cash: float,
             continue
 
         if not fired_in_streak and sign == "+" and streak_len >= plus_days:
-            p.buy(str(row["date"]), float(close), qty=None)
+            p.buy(str(row["date"]), float(close), qty=None, reason=f"+{plus_days}일 연속 유지")
             fired_in_streak = True
         elif not fired_in_streak and sign == "-" and streak_len >= minus_days:
-            p.sell(str(row["date"]), float(close), all_out=True)
+            p.sell(str(row["date"]), float(close), all_out=True, reason=f"-{minus_days}일 연속 유지")
             fired_in_streak = True
 
     last = df.iloc[-1]

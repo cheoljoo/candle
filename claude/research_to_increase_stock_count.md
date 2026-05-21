@@ -347,10 +347,10 @@ D200   : -→+ 변곡점   @1,100원  → 가격 1,100원 < 1,260원
 
 ## 4. 추천 전략 — type4 / type5 (신규 제안)
 
-### type4 — "DCA + Inflection Boost + Partial Sell" (주식 수 증대 우선)
+### type3_boost — "DCA + Inflection Boost + Partial Sell" (주식 수 증대 우선)
 
 ```yaml
-type4:
+type3_boost:
   description: "적립 + 변곡점 추가 매수 + 부분 매도 (주식 수 증대형)"
   interval_days: 90        # 적립 주기 (DCA)
   base_amount:             # 적립 1회 금액 (config 분리)
@@ -360,7 +360,7 @@ type4:
                            #   1.0 = 적립 1회분과 동일 금액 추가
                            #   0.5 = 적립 1회분의 절반만 추가
   sell_fraction: 0.30      # +→- 변곡점 시 보유분의 30%만 매도 (70% 코어 유지)
-  price_guard: 1.10        # 직전 매도가 × 1.10 = 매수 허용 상한선
+  price_guard: 1.20        # 직전 매도가 × 1.10 = 매수 허용 상한선
                            #   변곡점 발생일 종가가 이 상한선 이하면 추가 매수 실행
                            #   상한선 초과면 추가 매수 SKIP (= 매수 안 함)
                            #   예: last_sell = 100원 → 110원 이하에서만 매수

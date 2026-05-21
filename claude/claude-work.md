@@ -1282,3 +1282,137 @@
 - **render.py 수정**
   - `compare_full.html` 렌더링 추가 (compare.html 렌더 직후, 동일 common_ctx 사용)
   - `_load_compare_top10()`에서 이미 전체 종목 데이터를 반환하므로 Python 측 추가 작업 없음
+
+---
+
+## 2026-05-21
+
+### 신규 backtest type 6종 추가 — type4_boost, type3_im_boost, type4_boost_opt, type3_im_boost_opt, type5_dd, type2_2_opt_v
+
+- **사용자 요청** : 새 투자 전략 6종을 구현하고 backtest → compare → simulate → dashboard 까지 전 파이프라인에 반영.
+
+#### 전략 설계
+
+| type | 매수 | 매도 | 특징 |
+|------|------|------|------|
+| `type4_boost` | DCA(90일 주기) + -→+ 변곡 × inflection_boost | +→- 변곡 30% 부분매도 | price_guard(1.10) 이상이면 재매수 억제 |
+| `type3_im_boost` | DCA(90일 주기) + -→+ 변곡 × (inflection_boost + alpha × discount_ratio) | 없음 (매도 안 함) | +→- 변곡: last_sell_inflection_price 갱신만 |
+| `type4_boost_opt` | DCA + streak(최적화) 매수신호 × inflection_boost | streak 매도신호 30% | type4_boost의 streak 버전 |
+| `type3_im_boost_opt` | DCA + streak 매수신호 × boost | 없음 | type3_im_boost의 streak 버전 |
+| `type5_dd` | -→+ 변곡 전액 매수(rebuy_price_guard) | 고점 대비 drawdown: 1차 50%, 2차 30% | +→- 변곡 무시, high_watermark 관리 |
+| `type2_2_opt_v` | streak_len 이 [plus_days × (1−vp), plus_days × (1+vp)] 진입 첫 날 | streak_len 이 [minus_days × (1−vp), plus_days × (1+vp)] 진입 첫 날 | ±30% 밴드 허용으로 type2_2_opt 대비 거래 빈도 증가 |
+
+#### 구현 파일
+- `src/candle/backtest/type4_boost.py` 신규
+- `src/candle/backtest/type3_im_boost.py` 신규
+- `src/candle/backtest/type4_boost_opt.py` 신규
+- `src/candle/backtest/type3_im_boost_opt.py` 신규
+- `src/candle/backtest/type5_dd.py` 신규
+- `src/candle/backtest/type2_2_opt_v.py` 신규
+
+#### 연동 파일 수정
+- `src/candle/backtest/__init__.py` : import 추가, ALL_TYPES 갱신
+- `src/candle/backtest/run.py`
+  - `ALL` 리스트, `_OPT_PARAM_TYPES`, `_resume()`, `_dispatch()` 6종 케이스 추가
+  - DCA 타입 증분 처리: `last_dca_date` = max(buy_date), `last_sell_price` = 마지막 sell 가격, `last_sell_inflection_price` = daily에서 +→- inflection 역방향 스캔
+  - `_FULL_RECOMPUTE_TYPES = frozenset()` (전체 재계산 강제 제거 — 성능 이슈)
+- `src/candle/config.py` : ALL_TYPES 튜플에 6종 추가
+- `config/strategies.yml` : 6종 파라미터 설정 + enabled_types 목록에 추가
+- `src/candle/simulate/engine.py` : `_rule_signal()` + `_rule_qty()`에 6종 신호 로직 추가
+  - type4_boost/type3_im_boost/type5_dd: MA10M 변곡점 기반
+  - type4_boost_opt/type3_im_boost_opt: fallback streak 파라미터 기반
+  - type2_2_opt_v: variant band (lower_p = max(1, int(p_base × (1-vp)))) 첫 진입일
+
+#### 검증 결과
+- **Backtest** : 6종 `output/backtest/full/` CSV 생성 확인
+- **Compare** : `output/compare/full/strategy_summary.csv` 에 6종 전략 행 포함 확인
+- **Simulate** : `candle simulate --no-ai` → rule=962건 생성, decisions.csv에 rule:type4_boost, rule:type3_im_boost, rule:type3_im_boost_opt, rule:type4_boost_opt, rule:type5_dd, rule:type2_2_opt_v 모두 확인
+- **Dashboard** : `candle dashboard` 정상 완료 (11개 파일), decisions.html에 6종 필터 버튼 생성 확인
+
+### dashboard "전략 코드 + Periods" 설명 — config/strategies.yml 기반 자동화
+
+- **문제** : `render.py`에 hardcoded된 `type_descriptions` 딕셔너리가 구 7종 type(type1_1~type3)만 포함. 신규 type0_2, type2_2_opt, 6종 신규 type이 모두 누락.
+- **설계 원칙** : 앞으로 새 type 추가 시 `strategies.yml`에 파라미터만 추가하면 대시보드 설명이 자동 반영.
+- **수정** (`config/strategies.yml`)
+  - 모든 type에 `short_desc` 필드 추가 (기존 7종 + type0_2 + type2_2_opt + 6 신규 = 15종)
+  - `description` 필드를 상세 설명(detail text)으로 통일
+  - 이후 새 type은 YAML에 `short_desc` + `description` + 파라미터만 추가하면 됨
+- **수정** (`src/candle/dashboard/render.py`)
+  - hardcoded `type_descriptions` 딕셔너리 → 동적 생성으로 교체:
+    ```python
+    type_descriptions = {}
+    for tname in cfg.ALL_TYPES:
+        s = cfg.strategies.get(tname, {})
+        short = str(s.get("short_desc") or tname)
+        detail = str(s.get("description") or "")
+        type_descriptions[tname] = (short, detail)
+    ```
+  - `cfg.ALL_TYPES` 순서로 자동 정렬 → YAML에 추가 시 `config.py`의 `ALL_TYPES`에도 추가하면 됨
+- **검증** : `candle dashboard` 정상 완료. compare.html 전략 코드 범례에 15개 type 모두 표시, short_desc + description 올바름 확인
+
+### ALL_TYPES를 strategies.yml 기반으로 자동 파생
+
+- **사용자 요청** : 새 type 추가 시 `config.py`의 `ALL_TYPES`를 굳이 수정할 필요 없도록 자동화.
+- **수정** (`src/candle/config.py`)
+  - `ALL_TYPES: tuple[str, ...] = (...)` 하드코딩 제거 → `@property def ALL_TYPES()` 로 교체
+  - `return tuple(k for k in self.strategies if k.startswith("type"))` — YAML 정의 순서 유지 (PyYAML 3.7+ 보장)
+- **수정** (`src/candle/backtest/run.py`) : 미사용 `ALL` 리스트 삭제
+- **수정** (`src/candle/backtest/__init__.py`) : 중복 `ALL_TYPES` 삭제, `__all__` 정리
+- **효과** : `strategies.yml`에 `type_xxx:` 섹션 추가만으로 `ALL_TYPES`, `enabled_types`, `disabled_types`, 대시보드 전략 설명 모두 자동 반영
+
+### simulate engine.py config 기반 리팩터링
+
+- **사용자 요청** : `_rule_signal()`의 type별 hardcoded if/elif를 config 기반으로 교체.
+- **수정** (`config/strategies.yml`) : 각 type에 `simulate: {signal: inflection|streak|streak_variant|dca|hold, sell: true|false}` 추가 (15종 전체)
+- **수정** (`src/candle/simulate/engine.py`)
+  - `_rule_signal()` 전면 재작성 — `s.get("simulate", {})` 에서 `signal_type`, `has_sell` 읽어 공통 로직 실행
+  - `_rule_qty()` : `s.get("qty")` 만 읽어 반환 (전액/전량 → None)
+  - 새 type 추가 시 `engine.py` 수정 불필요 (strategies.yml의 `simulate` 섹션만 추가)
+
+---
+
+## 2026-05-21 (4차)
+
+### compare "전략별 요약" 탭 구조 변경 + 버그 수정 + backtest reason 추가
+
+#### 7가지 개선 처리 요약
+
+**1. 전략 코드 설명 글자 겹침 수정** (`_type_legend.html`)
+  - `w-16` (64px) → `w-40` (160px): `type3_im_boost_opt` 등 긴 type명 표시 정상화
+
+**2. _all.csv / _summary.csv KR/US 분리 실행 덮어쓰기 버그** (`backtest/run.py`)
+  - `v2-backtest-kr` → `v2-backtest-us` 순 실행 시 `_all.csv`가 US 데이터로 덮어쓰기되던 문제
+  - 수정: 쓰기 전 기존 파일의 다른 마켓 ticker 행을 보존하고 merge
+
+**3. 전략별 요약 탭 구조 변경** (`compare.html`)
+  - 기존: 1탭=기간, 2탭=전략, 테이블=그룹별 수익률
+  - 변경: 1탭=기간, 2탭=그룹(KOSPI200/SP500/ETF_KR/ETF_US/TOTAL), 테이블=전략별 수익률
+  - 전략명 기준 오름차순 정렬 (수익률 정렬 → 전략명 정렬)
+
+**4. CASH_TRACKING_TYPES 누락 버그** (`compare/run.py`)
+  - `type2_2_opt_v`, `type0_2`, `type5_dd`, DCA boost 4종 누락 → 초기자본이 누적 매수금액으로 잘못 계산
+  - 예: type2_2_opt_v KRW 수익률 -93% → +1007%로 정정
+  - DCA boost type 전용 `initial_capital = base_amount * buy_count` 분기 추가
+
+**5. backtest 거래 결정 사유 (reason) 추가** (`backtest/base.py` + 13개 type 파일)
+  - `TRADE_COLUMNS`에 `"reason"` 추가
+  - `buy()`, `sell()` 에 `reason: str = ""` 파라미터 추가
+  - 각 type 파일에서 신호 발생 이유를 reason으로 전달:
+    - type1_1/type1_2: `"MA10M 변곡 -→+"`, `"MA10M 변곡 +→-"`
+    - type2_1/type2_2: `"+N일 연속 유지"`, `"-N일 연속 유지"`
+    - type2_2_opt: `"+N일 연속 유지 (최적)"`
+    - type2_2_opt_v: `"+N일 진입 (최적 M일±30%)"`
+    - type3: `"DCA 90일 주기"`
+    - type4_boost: `"DCA N일 주기"`, `"변곡 -→+ 추가매수"`, `"변곡 +→- 30% 매도"`
+    - type3_im_boost: `"DCA N일 주기"`, `"변곡 -→+ alpha 추가매수 (×M.MM)"`
+    - type4_boost_opt: `"DCA N일 주기"`, `"+N일 연속 추가매수 (최적)"`, `"-N일 연속 N% 매도 (최적)"`
+    - type3_im_boost_opt: `"DCA N일 주기"`, `"+N일 연속 alpha 추가매수 (×M.MM, 최적)"`
+    - type5_dd: `"변곡 -→+ 전액매수"`, `"Drawdown -N.N% (≥15%) 1차 50% 매도"`, `"Drawdown ... 2차 30% 매도"`
+    - type0_2: `"최초 전액매수 (Buy-and-Hold)"`
+  - `render.py` `_generate_trade_jsons()`: `"reason"` 컬럼 포함
+  - `ticker_trades.html` 거래 테이블: `"결정 사유"` 컬럼 추가 (buy=초록, sell=빨강 색상)
+
+**6. S&P500 주식수 full 기간만 표시** : 이슈 2(merge 버그) 수정 후 backtest 재실행하면 자동 해결
+
+**7. 기간별 주식수 % 변화 표시** (`ticker_trades.html`)
+  - `fmtQtyCell(first, last, final)` — `(+/-N.N%)` 색상 표시: 증가=초록, 감소=빨강

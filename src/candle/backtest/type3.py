@@ -50,7 +50,7 @@ def run_one(ticker: str, daily: pd.DataFrame,
         if p.initial_cash is None:
             p.initial_cash = 0.0
         p.initial_cash = float(p.initial_cash) + installment_amount
-        p.buy(dt.strftime("%Y-%m-%d"), float(close), qty=None)
+        p.buy(dt.strftime("%Y-%m-%d"), float(close), qty=None, reason=f"DCA {interval_days}일 주기")
         next_buy_dt = dt + timedelta(days=interval_days)
 
     last = df.iloc[-1]

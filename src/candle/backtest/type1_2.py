@@ -24,9 +24,9 @@ def run_one(ticker: str, daily: pd.DataFrame, initial_cash: float,
         if pd.isna(close):
             continue
         if infl == "-→+":
-            p.buy(str(row["date"]), float(close), qty=None)
+            p.buy(str(row["date"]), float(close), qty=None, reason="MA10M 변곡 -→+")
         elif infl == "+→-":
-            p.sell(str(row["date"]), float(close), all_out=True)
+            p.sell(str(row["date"]), float(close), all_out=True, reason="MA10M 변곡 +→-")
     last = df.iloc[-1]
     last_close = pd.to_numeric(pd.Series([last["close"]]), errors="coerce").iloc[0]
     if not pd.isna(last_close):

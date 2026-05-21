@@ -11,6 +11,7 @@ TRADE_COLUMNS = [
     "type", "date", "ticker", "side",
     "price", "qty", "amount",
     "holding_qty", "holding_value", "cash", "return_pct", "buy_sell_return_pct",
+    "reason",
 ]
 
 
@@ -33,7 +34,7 @@ class Portfolio:
         self._last_buy_total: float | None = None
 
     def _record(self, dt: str, side: str, price: float, qty: float,
-                buy_sell_return_pct: float | None = None):
+                buy_sell_return_pct: float | None = None, reason: str = ""):
         amount = price * qty
         self.trades.append({
             "type": self.type_name,
@@ -48,6 +49,7 @@ class Portfolio:
             "cash": float(self.cash) if self.initial_cash is not None else None,
             "return_pct": self._current_return_pct(price),
             "buy_sell_return_pct": buy_sell_return_pct,
+            "reason": reason,
         })
 
     def _current_return_pct(self, price: float) -> float | None:
@@ -60,7 +62,7 @@ class Portfolio:
         total = self.cash + self.qty * price
         return float((total - self.initial_cash) / self.initial_cash * 100.0)
 
-    def buy(self, dt: str, price: float, qty: float | None = None):
+    def buy(self, dt: str, price: float, qty: float | None = None, reason: str = ""):
         """qty=None이면 현금 전액으로 가능한 만큼 매수 (type1_2, type2_2 용)."""
         if qty is None:
             if self.cash <= 0 or price <= 0:
@@ -82,9 +84,9 @@ class Portfolio:
         # 다음 sell의 buy_sell_return_pct 계산을 위해 buy 시점 총자산 기록
         if self.initial_cash is not None:
             self._last_buy_total = float(self.qty * price + self.cash)
-        self._record(dt, "buy", price, qty)
+        self._record(dt, "buy", price, qty, reason=reason)
 
-    def sell(self, dt: str, price: float, qty: float | None = None, all_out: bool = False):
+    def sell(self, dt: str, price: float, qty: float | None = None, all_out: bool = False, reason: str = ""):
         if all_out or qty is None:
             qty = self.qty
         if qty <= 0 or self.qty <= 0:
@@ -105,7 +107,7 @@ class Portfolio:
             sell_total = float(self.qty * price + self.cash)
             buy_sell_ret = (sell_total - self._last_buy_total) / self._last_buy_total * 100.0
             self._last_buy_total = None
-        self._record(dt, "sell", price, qty, buy_sell_return_pct=buy_sell_ret)
+        self._record(dt, "sell", price, qty, buy_sell_return_pct=buy_sell_ret, reason=reason)
 
     def mark_to_market(self, dt: str, price: float):
         """to-date 도달 시 보유분 종가 평가 (실제 매도 아님)."""

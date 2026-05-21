@@ -6,47 +6,61 @@ initial_capital:
   USD: 1000
 
 type1_1:
-  description: "신호(-→+ 매수, +→- 매도) — 고정 10주"
+  short_desc: "변곡점 신호 · 고정수량 매수·매도"
+  description: "MA10M 교차(-→+) 매수 / (+→-) 매도, 10주 고정"
+  simulate: {signal: inflection, sell: true}
   qty: 10
 
 type1_2:
-  description: "신호 — 가용 현금 전액 매수 / 전량 매도"
+  short_desc: "변곡점 신호 · 전액매수·전량매도"
+  description: "MA10M 교차(-→+) 전액 매수 / (+→-) 전량 매도"
+  simulate: {signal: inflection, sell: true}
 
 type2_1:
-  description: "plus_days/minus_days 카운터 (8/4) — 10주"
+  short_desc: "연속일수(8/4) · 고정수량 매수·매도"
+  description: "+8일 연속 → 매수(10주 고정) / -4일 연속 → 매도(10주 고정)"
+  simulate: {signal: streak, sell: true}
   plus_days: 8
   minus_days: 4
   qty: 10
 
 type2_2:
-  description: "plus_days/minus_days 카운터 (8/4) — 전액/전량"
+  short_desc: "연속일수(8/4) · 전액매수·전량매도"
+  description: "+8일 연속 → 전액 매수 / -4일 연속 → 전량 매도"
+  simulate: {signal: streak, sell: true}
   plus_days: 8
   minus_days: 4
 
 type2_1b:
-  description: "plus_days/minus_days 카운터 (33/5) — 10주"
+  short_desc: "연속일수(33/5) · 고정수량 매수·매도"
+  description: "+33일 연속 → 매수(10주 고정) / -5일 연속 → 매도(10주 고정)"
+  simulate: {signal: streak, sell: true}
   plus_days: 33
   minus_days: 5
   qty: 10
 
 type2_2b:
-  description: "plus_days/minus_days 카운터 (33/5) — 전액/전량"
+  short_desc: "연속일수(33/5) · 전액매수·전량매도"
+  description: "+33일 연속 → 전액 매수 / -5일 연속 → 전량 매도"
+  simulate: {signal: streak, sell: true}
   plus_days: 33
   minus_days: 5
 
 type3:
-  description: "신호 무시. 3개월(90일)마다 적립식 매수, 매도 없음."
+  short_desc: "적립식 90일 주기"
+  description: "90일마다 일정 금액 입금 후 전액 매수, 매도 없음"
+  simulate: {signal: dca, sell: false}
   interval_days: 90
 
 type0_2:
-  description: "매수 후 보유 — 첫 거래일에 KRW/USD 전액 매수, 매도 없음, 종가로만 수익률 평가."
+  short_desc: "매수 후 보유 (벤치마크)"
+  description: "첫 거래일에 전액 매수, 이후 매도 없음. 종가로만 수익률 평가 (Buy-and-Hold)"
+  simulate: {signal: hold, sell: false}
 
 type2_2_opt:
-  description: >
-    종목별 최적화 plus_days/minus_days로 type2_2 실행.
-    optimize-streak --all-groups 결과(output/optimize/per_ticker/{group}/_summary.json)에서
-    각 종목의 최적 파라미터를 로드하여 전액매수/전량매도 전략 수행.
-    파라미터가 없는 종목은 type2_2b 기본값(plus=33, minus=5)으로 폴백.
+  short_desc: "종목별 최적 streak · 전액매수·전량매도"
+  description: "per-ticker 최적 plus_days/minus_days로 type2_2 실행. 파라미터 없으면 fallback(plus=1, minus=5)"
+  simulate: {signal: streak, sell: true}
   fallback_plus_days: 1
   fallback_minus_days: 5
 
@@ -66,3 +80,79 @@ enabled_types:
   - type3
   - type0_2
   - type2_2_opt
+  - type4_boost
+  - type3_im_boost
+  - type4_boost_opt
+  - type3_im_boost_opt
+  - type5_dd
+  - type2_2_opt_v
+
+type4_boost:
+  short_desc: "DCA + 변곡 부스트 매수 + 부분매도"
+  description: "90일 DCA + -→+ 변곡 × inflection_boost 추가 매수 + +→- 변곡 30% 부분매도 (price_guard 1.10)"
+  simulate: {signal: inflection, sell: true}
+  interval_days: 90
+  base_amount:
+    KRW: 1000000
+    USD: 100
+  inflection_boost: 1.0
+  sell_fraction: 0.30
+  price_guard: 1.10
+
+type3_im_boost:
+  short_desc: "DCA + 변곡 alpha 매수 (매도없음)"
+  description: "90일 DCA + -→+ 변곡 × (boost + alpha × 할인율) 추가 매수, 매도 없음 (price_guard 1.20)"
+  simulate: {signal: inflection, sell: false}
+  interval_days: 90
+  base_amount:
+    KRW: 1000000
+    USD: 100
+  inflection_boost: 1.0
+  alpha: 1.0
+  price_guard: 1.20
+
+type4_boost_opt:
+  short_desc: "DCA + streak 부스트 매수 + 부분매도"
+  description: "90일 DCA + streak 최적 매수신호 × inflection_boost 추가 매수 + streak 매도신호 30% 부분매도"
+  simulate: {signal: streak, sell: true}
+  interval_days: 90
+  base_amount:
+    KRW: 1000000
+    USD: 100
+  inflection_boost: 1.0
+  sell_fraction: 0.30
+  price_guard: 1.10
+  fallback_plus_days: 1
+  fallback_minus_days: 5
+
+type3_im_boost_opt:
+  short_desc: "DCA + streak alpha 매수 (매도없음)"
+  description: "90일 DCA + streak 최적 매수신호 × (boost + alpha × 할인율) 추가 매수, 매도 없음"
+  simulate: {signal: streak, sell: false}
+  interval_days: 90
+  base_amount:
+    KRW: 1000000
+    USD: 100
+  inflection_boost: 1.0
+  alpha: 1.0
+  price_guard: 1.20
+  fallback_plus_days: 1
+  fallback_minus_days: 5
+
+type5_dd:
+  short_desc: "전액매수 + drawdown 분할매도"
+  description: "-→+ 변곡 전액 매수, +→- 무시. 고점 대비 -15% → 50% 매도, -25% → 추가 30% 매도"
+  simulate: {signal: inflection, sell: false}
+  dd_first: 0.15
+  dd_second: 0.25
+  first_fraction: 0.50
+  second_fraction: 0.30
+  rebuy_price_guard: 1.10
+
+type2_2_opt_v:
+  short_desc: "최적 streak ±30% 밴드 · 전액매수·전량매도"
+  description: "종목별 최적 streak의 ±variant_percent(30%) 범위 첫 진입 시 거래 (variant band 허용)"
+  simulate: {signal: streak_variant, sell: true}
+  variant_percent: 0.30
+  fallback_plus_days: 1
+  fallback_minus_days: 5

@@ -190,40 +190,88 @@ def run(cfg: config.Config, on_date: date,
 
 
 def _rule_qty(type_name: str, cfg: config.Config, action: str) -> float | None:
-    s = cfg.strategies
-    if type_name == "type1_1":
-        return float(s["type1_1"]["qty"])
-    if type_name in ("type2_1", "type2_1b"):
-        return float(s[type_name]["qty"])
-    if type_name == "type3":
-        return None  # "전액" 입금 후 매수
-    return None  # 1_2, 2_2, 2_2b = 전액/전량
+    """strategies.yml 의 qty 필드를 읽어 반환. 없으면 None (전액/전량)."""
+    qty = cfg.strategies.get(type_name, {}).get("qty")
+    return float(qty) if qty is not None else None
 
 
 def _rule_signal(type_name: str, daily: pd.DataFrame, cur_row: pd.Series,
                  cfg: config.Config) -> tuple[str, str, str] | None:
-    """오늘 row 기준으로 신호 발화 여부.
-    반환: (action, reason, event_date) — event_date는 변곡점/연속 시작일."""
-    s = cfg.strategies
+    """오늘 row 기준으로 신호 발화 여부 — strategies.yml 의 simulate 섹션 기반.
+
+    반환: (action, reason, event_date)
+    simulate.signal 값:
+      inflection      — MA10M 변곡점 (-→+ buy, +→- sell if sell:true)
+      streak          — 연속일수 (plus_days/minus_days 또는 fallback_*)
+      streak_variant  — streak ± variant_percent 밴드 첫 진입
+      dca             — 항상 buy 신호 (interval_days 표시)
+      hold            — 신호 없음 (buy-and-hold)
+    """
+    s = cfg.strategies.get(type_name, {})
+    sim = s.get("simulate", {})
+    signal_type = sim.get("signal", "")
+    has_sell = bool(sim.get("sell", True))
     cur_date = str(cur_row["date"])
-    if type_name in ("type1_1", "type1_2"):
+
+    # ── inflection ────────────────────────────────────────────────────────────
+    if signal_type == "inflection":
         infl = cur_row.get("inflection")
-        if pd.isna(infl):
+        if pd.isna(infl) or not infl:
             return None
         if infl == "-→+":
             return ("buy", "MA10M 변곡 -→+", cur_date)
-        if infl == "+→-":
+        if infl == "+→-" and has_sell:
             return ("sell", "MA10M 변곡 +→-", cur_date)
         return None
 
-    if type_name in ("type2_1", "type2_2", "type2_1b", "type2_2b"):
-        plus_days = int(s[type_name]["plus_days"])
-        minus_days = int(s[type_name]["minus_days"])
-        return _streak_signal(daily, cur_row, plus_days, minus_days)
+    # ── streak ────────────────────────────────────────────────────────────────
+    if signal_type == "streak":
+        p_days = int(s.get("plus_days") or s.get("fallback_plus_days", 1))
+        m_days = int(s.get("minus_days") or s.get("fallback_minus_days", 5))
+        res = _streak_signal(daily, cur_row, p_days, m_days)
+        if res is None:
+            return None
+        action, reason, ev_date = res
+        if action == "buy":
+            return ("buy", reason, ev_date)
+        if action == "sell" and has_sell:
+            return ("sell", reason, ev_date)
+        return None
 
-    if type_name == "type3":
-        return ("buy", "적립식 90일 주기", cur_date)
+    # ── streak_variant ────────────────────────────────────────────────────────
+    if signal_type == "streak_variant":
+        vp = float(s.get("variant_percent", 0.30))
+        p_base = int(s.get("plus_days") or s.get("fallback_plus_days", 1))
+        m_base = int(s.get("minus_days") or s.get("fallback_minus_days", 5))
+        lower_p = max(1, int(p_base * (1 - vp)))
+        lower_m = max(1, int(m_base * (1 - vp)))
+        sign = cur_row.get("ma10m_updown")
+        if pd.isna(sign) or sign not in ("+", "-"):
+            return None
+        idx_list = daily.index[daily["date"] == cur_date].tolist()
+        if not idx_list:
+            return None
+        idx = idx_list[0]
+        streak = 1
+        for j in range(idx - 1, -1, -1):
+            if daily.iloc[j].get("ma10m_updown") == sign:
+                streak += 1
+            else:
+                break
+        streak_start_idx = max(0, idx - (streak - 1))
+        streak_start_date = str(daily.iloc[streak_start_idx]["date"])
+        if sign == "+" and streak == lower_p:
+            return ("buy", f"+{streak}일(variant, 최적기준±{int(vp*100)}%)", streak_start_date)
+        if sign == "-" and streak == lower_m and has_sell:
+            return ("sell", f"-{streak}일(variant, 최적기준±{int(vp*100)}%)", streak_start_date)
+        return None
 
+    # ── dca ───────────────────────────────────────────────────────────────────
+    if signal_type == "dca":
+        interval = int(s.get("interval_days", 90))
+        return ("buy", f"적립식 {interval}일 주기", cur_date)
+
+    # ── hold 또는 simulate 섹션 없음 → 신호 없음 ─────────────────────────────
     return None
 
 

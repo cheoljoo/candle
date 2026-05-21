@@ -223,7 +223,8 @@ v2-dashboard:
 # SENDMAIL=YES 설정 시 완료 후 전체 수신자에게 메일 발송
 # 예) make v2-all SENDMAIL=YES
 #     make v2-all DEBUG=--debug SENDMAIL=YES
-v2-all: v2-gmail-etf v2-universe v2-fetch v2-analyze v2-backtest v2-simulate v2-market-signals v2-dashboard v2-sendmail
+v2-all-sendmail: v2-gmail-etf v2-universe v2-fetch v2-analyze v2-backtest v2-simulate v2-market-signals v2-dashboard v2-sendmail
+v2-all: v2-gmail-etf v2-universe v2-fetch v2-analyze v2-backtest v2-simulate v2-market-signals v2-dashboard
 v2-sendmail:
 	uv run python -u gmail_sender.py \
 		--sendmail "$(SENDMAIL)" \
