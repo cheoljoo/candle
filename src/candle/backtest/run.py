@@ -9,12 +9,20 @@
 type2_2_opt 증분 처리:
 - output/backtest/{label}/type2_2_opt/_opt_params.json 에 ticker별 (plus_days, minus_days) 저장
 - 파라미터 변경 감지 시 해당 ticker 전체 재계산 (full), 동일 시 증분(resume) 적용
+
+성능 최적화 (3종):
+1. daily CSV 사전 캐시 — type 루프 전에 한 번만 로드 (N type × M ticker 읽기 → M회)
+2. ticker 병렬 처리  — ThreadPoolExecutor 로 type 내 ticker 병렬 실행
+3. trades CSV 캐시   — type 시작 시 기존 trades 일괄 로드 (resume/skip per-ticker 읽기 제거)
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -63,10 +71,7 @@ _OPT_PARAMS_FILE = "_opt_params.json"
 
 
 def _load_opt_params_used(out_dir: Path) -> dict[str, tuple[int, int]]:
-    """type2_2_opt 가 지난 번 사용한 (plus_days, minus_days) 로드.
-
-    반환: {ticker: (plus_days, minus_days)}
-    """
+    """type2_2_opt 가 지난 번 사용한 (plus_days, minus_days) 로드."""
     p = out_dir / _OPT_PARAMS_FILE
     if not p.exists():
         return {}
@@ -88,11 +93,7 @@ def _save_opt_params_used(out_dir: Path,
 
 def _load_opt_params_current(cfg: config.Config,
                               inst: pd.DataFrame) -> dict[str, tuple[int, int]]:
-    """output/optimize/per_ticker/{group}/_summary.json 에서 종목별 최적 파라미터 로드.
-
-    반환: {ticker: (plus_days, minus_days)}
-    파일이 없거나 ticker가 없으면 strategies.yml fallback 값 사용.
-    """
+    """output/optimize/per_ticker/{group}/_summary.json 에서 종목별 최적 파라미터 로드."""
     s = cfg.strategies.get("type2_2_opt", {})
     fallback_p = int(s.get("fallback_plus_days", 33))
     fallback_m = int(s.get("fallback_minus_days", 5))
@@ -128,10 +129,198 @@ def _initial_cash(cfg: config.Config, currency: str) -> float:
     return float(cfg.strategies["initial_capital"][currency])
 
 
+# ── 성능 최적화: 캐시 로드 ─────────────────────────────────────────────────
+
+def _load_daily_cache(cfg, inst: pd.DataFrame, label: str) -> dict[str, pd.DataFrame]:
+    """type 루프 전에 모든 ticker daily CSV를 한 번만 로드 (Optimization 1)."""
+    total = len(inst)
+    t0 = time.perf_counter()
+    tprint(f"[backtest] {label}daily CSV 캐시 로드 중 ({total}개)...", flush=True)
+    cache: dict[str, pd.DataFrame] = {}
+    for _, row in inst.iterrows():
+        ticker = str(row["ticker"])
+        mkt    = str(row["market"])
+        df = csv_io.read(paths.daily_csv(cfg.data_dir, mkt, ticker))
+        if not df.empty:
+            cache[ticker] = df
+    tprint(
+        f"[backtest] {label}daily CSV 캐시 완료 — {len(cache)}/{total}개"
+        f" ({time.perf_counter()-t0:.1f}s)",
+        flush=True,
+    )
+    return cache
+
+
+def _load_trades_cache(out_dir: Path, tickers: list[str]) -> dict[str, pd.DataFrame]:
+    """type 시작 시 기존 ticker trades CSV를 일괄 로드 (Optimization 3)."""
+    cache: dict[str, pd.DataFrame] = {}
+    for ticker in tickers:
+        p = out_dir / f"{ticker}.csv"
+        if p.exists():
+            df = csv_io.read(p)
+            if not df.empty:
+                cache[ticker] = df
+    return cache
+
+
+# ── 단일 ticker 처리 결과 ────────────────────────────────────────────────
+
+@dataclass
+class _TickerResult:
+    skipped: bool = False
+    summary: dict | None = None
+    trades: pd.DataFrame | None = None
+    meta_key: tuple | None = None
+    meta_val: tuple | None = None
+    opt_param: tuple | None = None
+
+
+def _process_ticker(
+    *,
+    row,
+    i: int,
+    total: int,
+    type_name: str,
+    out_dir: Path,
+    daily: pd.DataFrame,
+    existing_trades: pd.DataFrame | None,
+    meta: dict,
+    cfg,
+    start: date | None,
+    end: date | None,
+    debug: bool,
+    label: str,
+    cur_opt_params: dict,
+    prev_opt_params: dict,
+) -> _TickerResult:
+    """단일 ticker backtest — thread-safe (각 ticker 고유 파일에만 쓰기) (Optimization 2)."""
+    ticker   = str(row["ticker"])
+    currency = str(row["currency"])
+    trades_path = out_dir / f"{ticker}.csv"
+    result = _TickerResult()
+    t0 = time.perf_counter()
+
+    eff_from = start.isoformat() if start else str(daily.iloc[0]["date"])
+    eff_to   = end.isoformat()   if end   else str(daily.iloc[-1]["date"])
+    prev     = meta.get((type_name, ticker))
+
+    mode = "full"
+    if prev is not None:
+        if prev[0] == eff_from and prev[1] == eff_to:
+            mode = "skip"
+        elif prev[0] == eff_from and prev[1] < eff_to:
+            mode = "resume"
+
+    if type_name == "type2_2_opt" and mode != "full":
+        opt_cur  = cur_opt_params.get(ticker)
+        opt_prev = prev_opt_params.get(ticker)
+        if opt_cur is not None and opt_cur != opt_prev:
+            mode = "full"
+            if debug:
+                print(f"[backtest][debug] [{type_name}] ({i}/{total}) {ticker}"
+                      f" opt params changed {opt_prev}→{opt_cur}, force full", flush=True)
+
+    _opt_p     = cur_opt_params.get(ticker) if type_name == "type2_2_opt" else None
+    _opt_plus  = _opt_p[0] if _opt_p else None
+    _opt_minus = _opt_p[1] if _opt_p else None
+
+    try:
+        if mode == "skip":
+            result.skipped = True
+            existing = existing_trades
+            if existing is not None and not existing.empty:
+                last_row = existing.iloc[-1]
+                result.summary = _summary_row(type_name, ticker, row, currency,
+                                              _count(existing, "buy"),
+                                              _count(existing, "sell"), last_row)
+                result.trades = existing
+            result.meta_key = (type_name, ticker)
+            result.meta_val = prev
+            if type_name == "type2_2_opt" and ticker in cur_opt_params:
+                result.opt_param = cur_opt_params[ticker]
+            if debug:
+                print(f"[backtest][debug] [{type_name}] ({i}/{total}) {ticker}"
+                      f" SKIP — from={eff_from} to={eff_to}", flush=True)
+
+        elif mode == "resume":
+            existing = existing_trades
+            if existing is None or existing.empty:
+                # 기존 trades 없음 → full fallback
+                pf = _dispatch(type_name, ticker, daily, currency, cfg, start, end,
+                               opt_plus_days=_opt_plus, opt_minus_days=_opt_minus)
+                if pf is None:
+                    return result
+                new_trades = pf.trades_df()
+                if new_trades.empty:
+                    return result
+                csv_io.atomic_write(new_trades, trades_path)
+                result.summary = _summary_row(type_name, ticker, row, currency,
+                                              pf.buy_count, pf.sell_count, new_trades.iloc[-1])
+                result.trades  = new_trades
+                result.meta_key = (type_name, ticker)
+                result.meta_val = (eff_from, eff_to)
+            else:
+                pf, new_start = _resume(type_name, ticker, daily, currency, cfg,
+                                        existing, prev[1], end,
+                                        opt_plus_days=_opt_plus, opt_minus_days=_opt_minus)
+                new_trades = pf.trades_df()
+                if new_trades.empty:
+                    result.meta_key = (type_name, ticker)
+                    result.meta_val = (eff_from, eff_to)
+                    result.summary  = _summary_row(type_name, ticker, row, currency,
+                                                   _count(existing, "buy"),
+                                                   _count(existing, "sell"), existing.iloc[-1])
+                    result.trades   = existing
+                    if debug:
+                        print(f"[backtest][debug] [{type_name}] ({i}/{total}) {ticker}"
+                              f" resume — 새 거래 없음 ({time.perf_counter()-t0:.2f}s)", flush=True)
+                else:
+                    base_trades = existing[existing["side"] != "mark_to_market"].copy()
+                    combined = pd.concat([base_trades, new_trades], ignore_index=True)
+                    csv_io.atomic_write(combined, trades_path)
+                    result.summary  = _summary_row(type_name, ticker, row, currency,
+                                                   _count(combined, "buy"),
+                                                   _count(combined, "sell"), combined.iloc[-1])
+                    result.trades   = combined
+                    result.meta_key = (type_name, ticker)
+                    result.meta_val = (eff_from, eff_to)
+                    if debug:
+                        print(f"[backtest][debug] [{type_name}] ({i}/{total}) {ticker}"
+                              f" resume +{len(new_trades)}건 ({time.perf_counter()-t0:.2f}s)", flush=True)
+            if type_name == "type2_2_opt" and ticker in cur_opt_params:
+                result.opt_param = cur_opt_params[ticker]
+
+        else:  # full
+            pf = _dispatch(type_name, ticker, daily, currency, cfg, start, end,
+                           opt_plus_days=_opt_plus, opt_minus_days=_opt_minus)
+            if pf is None:
+                return result
+            new_trades = pf.trades_df()
+            if new_trades.empty:
+                return result
+            csv_io.atomic_write(new_trades, trades_path)
+            result.summary  = _summary_row(type_name, ticker, row, currency,
+                                           pf.buy_count, pf.sell_count, new_trades.iloc[-1])
+            result.trades   = new_trades
+            result.meta_key = (type_name, ticker)
+            result.meta_val = (eff_from, eff_to)
+            if type_name == "type2_2_opt" and ticker in cur_opt_params:
+                result.opt_param = cur_opt_params[ticker]
+            if debug:
+                print(f"[backtest][debug] [{type_name}] ({i}/{total}) {ticker}"
+                      f" full {len(new_trades)}건 ({time.perf_counter()-t0:.2f}s)", flush=True)
+
+    except Exception as e:
+        log.warning(f"backtest {type_name} {ticker} 실패: {e}")
+        if debug:
+            print(f"[backtest][debug] [{type_name}] ({i}/{total}) {ticker} FAIL: {e}", flush=True)
+
+    return result
+
+
 def run(cfg: config.Config, type_names: list[str], market: str,
         start: date | None, end: date | None,
         debug: bool = False, period: str | None = None) -> dict[str, dict]:
-    # 실제 출력 경로 패턴 — period/label 유무에 따라 다름
     _bt = f"output/backtest/{period}/{{type}}" if period else "output/backtest/{type}"
     _period_info = (
         f"기간: {start.isoformat() if start else '전체'} ~ {end.isoformat() if end else '오늘'}"
@@ -167,24 +356,31 @@ def run(cfg: config.Config, type_names: list[str], market: str,
     n_types = len(type_names)
     _label = f"[{period}] " if period else ""
     _progress_step = max(1, min(10, total // 10))
+    n_workers = min(8, os.cpu_count() or 4)
 
-    # ── 증분 meta 로드 ─────────────────────────────────────────────────────
     bt_root = paths.backtest_root(cfg.output_dir, period)
     bt_root.mkdir(parents=True, exist_ok=True)
     meta = _load_meta(bt_root)
     updated_meta: dict[tuple[str, str], tuple[str, str]] = {}
 
+    # ── Optimization 1: daily CSV 사전 캐시 (전체 type 공통, 한 번만 읽기) ──
+    daily_cache = _load_daily_cache(cfg, inst, _label)
+    # daily 데이터가 있는 ticker + 원본 row 를 순서대로 보존
+    ticker_rows: list[tuple[int, object]] = [
+        (enum_i, row)
+        for enum_i, (_, row) in enumerate(inst.iterrows(), start=1)
+        if str(row["ticker"]) in daily_cache
+    ]
+    ticker_list = [str(row["ticker"]) for _, row in ticker_rows]
+
     for type_idx, type_name in enumerate(type_names, start=1):
         out_dir = paths.backtest_dir(cfg.output_dir, type_name, period)
         out_dir.mkdir(parents=True, exist_ok=True)
-        all_trades: list[pd.DataFrame] = []
-        per_ticker_summary: list[dict] = []
         type_t0 = time.perf_counter()
         skipped_count = 0
 
         tprint(f"[backtest] {_label}type={type_name} ({type_idx}/{n_types}) 시작 — {total}개 ticker", flush=True)
 
-        # ── type2_2_opt: 최적화 파라미터 로드 및 변경 감지 ──────────────────
         cur_opt_params: dict[str, tuple[int, int]] = {}
         prev_opt_params: dict[str, tuple[int, int]] = {}
         updated_opt_params: dict[str, tuple[int, int]] = {}
@@ -194,133 +390,61 @@ def run(cfg: config.Config, type_names: list[str], market: str,
             tprint(f"[backtest] {_label}type2_2_opt — "
                    f"opt 파라미터 로드 완료 ({len(cur_opt_params)}개 종목)", flush=True)
 
-        for i, (_, row) in enumerate(inst.iterrows(), start=1):
-            ticker   = str(row["ticker"])
-            mkt      = str(row["market"])
-            group    = str(row["group_name"])
-            currency = str(row["currency"])
-            trades_path = out_dir / f"{ticker}.csv"
+        # ── Optimization 3: 기존 trades CSV 사전 캐시 (이 type 전체) ────────
+        trades_cache = _load_trades_cache(out_dir, ticker_list)
 
-            t0 = time.perf_counter()
-            daily = csv_io.read(paths.daily_csv(cfg.data_dir, mkt, ticker))
-            if daily.empty:
-                if debug:
-                    print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} — empty daily", flush=True)
-                continue
+        # ── Optimization 2: ticker 병렬 처리 ─────────────────────────────
+        all_trades: list[pd.DataFrame] = []
+        per_ticker_summary: list[dict] = []
+        done_count = 0
+        n_submitted = len(ticker_rows)
 
-            # 실제 처리 구간
-            eff_from = start.isoformat() if start else str(daily.iloc[0]["date"])
-            eff_to   = end.isoformat()   if end   else str(daily.iloc[-1]["date"])
-            prev = meta.get((type_name, ticker))
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures: dict = {
+                executor.submit(
+                    _process_ticker,
+                    row=row,
+                    i=enum_i,
+                    total=total,
+                    type_name=type_name,
+                    out_dir=out_dir,
+                    daily=daily_cache[str(row["ticker"])],
+                    existing_trades=trades_cache.get(str(row["ticker"])),
+                    meta=meta,
+                    cfg=cfg,
+                    start=start,
+                    end=end,
+                    debug=debug,
+                    label=_label,
+                    cur_opt_params=cur_opt_params,
+                    prev_opt_params=prev_opt_params,
+                ): str(row["ticker"])
+                for enum_i, row in ticker_rows
+            }
 
-            mode = "full"  # full | skip | resume
-            if prev is not None:
-                if prev[0] == eff_from and prev[1] == eff_to:
-                    mode = "skip"
-                elif prev[0] == eff_from and prev[1] < eff_to:
-                    mode = "resume"
-                # prev[0] != eff_from → full (from 이 달라짐)
+            for fut in as_completed(futures):
+                ticker = futures[fut]
+                try:
+                    res: _TickerResult = fut.result()
+                    if res.summary is not None:
+                        per_ticker_summary.append(res.summary)
+                    if res.trades is not None:
+                        all_trades.append(res.trades)
+                    if res.meta_key is not None:
+                        updated_meta[res.meta_key] = res.meta_val
+                    if res.opt_param is not None:
+                        updated_opt_params[ticker] = res.opt_param
+                    if res.skipped:
+                        skipped_count += 1
+                except Exception as e:
+                    log.warning(f"[backtest] {type_name}/{ticker} 처리 실패: {e}")
 
-            # type2_2_opt: 최적화 파라미터가 변경된 경우 강제 full 재계산
-            if type_name == "type2_2_opt" and mode != "full":
-                opt_cur  = cur_opt_params.get(ticker)
-                opt_prev = prev_opt_params.get(ticker)
-                if opt_cur is not None and opt_cur != opt_prev:
-                    mode = "full"
-                    if debug:
-                        print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker}"
-                              f" opt params changed {opt_prev}→{opt_cur}, force full", flush=True)
+                done_count += 1
+                if done_count % _progress_step == 0 or done_count == n_submitted:
+                    _print_progress(_label, type_name, done_count, n_submitted,
+                                    len(per_ticker_summary), type_t0)
 
-            if mode == "skip":
-                skipped_count += 1
-                # 기존 trades 로 summary 재구성
-                existing = csv_io.read(trades_path)
-                if not existing.empty:
-                    last_row = existing.iloc[-1]
-                    per_ticker_summary.append(_summary_row(type_name, ticker, row, currency,
-                                                            _count(existing, "buy"),
-                                                            _count(existing, "sell"),
-                                                            last_row))
-                    all_trades.append(existing)
-                updated_meta[(type_name, ticker)] = prev
-                # type2_2_opt: skip 시에는 기존 파라미터 유지 (변경 없음이 보장됨)
-                if type_name == "type2_2_opt" and ticker in cur_opt_params:
-                    updated_opt_params[ticker] = cur_opt_params[ticker]
-                if debug:
-                    print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} SKIP — from={eff_from} to={eff_to}", flush=True)
-                if i % _progress_step == 0 or i == total:
-                    _print_progress(_label, type_name, i, total, len(per_ticker_summary), type_t0)
-                continue
-
-            try:
-                # type2_2_opt: 현재 ticker의 최적 파라미터 추출
-                _opt_p = cur_opt_params.get(ticker)
-                _opt_plus  = _opt_p[0] if _opt_p else None
-                _opt_minus = _opt_p[1] if _opt_p else None
-
-                if mode == "resume":
-                    existing = csv_io.read(trades_path)
-                    pf, new_start = _resume(type_name, ticker, daily, currency, cfg,
-                                            existing, prev[1], end,
-                                            opt_plus_days=_opt_plus,
-                                            opt_minus_days=_opt_minus)
-                    new_trades = pf.trades_df()
-                    if new_trades.empty:
-                        # 새 신호 없음 — 기존 유지
-                        updated_meta[(type_name, ticker)] = (eff_from, eff_to)
-                        last_row = existing.iloc[-1]
-                        per_ticker_summary.append(_summary_row(type_name, ticker, row, currency,
-                                                                _count(existing, "buy"),
-                                                                _count(existing, "sell"),
-                                                                last_row))
-                        all_trades.append(existing)
-                        if debug:
-                            print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} resume — 새 거래 없음 ({time.perf_counter()-t0:.2f}s)", flush=True)
-                    else:
-                        # mark_to_market 제거 후 append
-                        base_trades = existing[existing["side"] != "mark_to_market"].copy()
-                        combined = pd.concat([base_trades, new_trades], ignore_index=True)
-                        csv_io.atomic_write(combined, trades_path)
-                        last_row = combined.iloc[-1]
-                        per_ticker_summary.append(_summary_row(type_name, ticker, row, currency,
-                                                                _count(combined, "buy"),
-                                                                _count(combined, "sell"),
-                                                                last_row))
-                        all_trades.append(combined)
-                        updated_meta[(type_name, ticker)] = (eff_from, eff_to)
-                        if debug:
-                            print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} resume +{len(new_trades)}건 ({time.perf_counter()-t0:.2f}s)", flush=True)
-                else:
-                    pf = _dispatch(type_name, ticker, daily, currency, cfg, start, end,
-                                   opt_plus_days=_opt_plus, opt_minus_days=_opt_minus)
-                    if pf is None:
-                        continue
-                    new_trades = pf.trades_df()
-                    if new_trades.empty:
-                        continue
-                    csv_io.atomic_write(new_trades, trades_path)
-                    last_row = new_trades.iloc[-1]
-                    per_ticker_summary.append(_summary_row(type_name, ticker, row, currency,
-                                                            pf.buy_count, pf.sell_count, last_row))
-                    all_trades.append(new_trades)
-                    updated_meta[(type_name, ticker)] = (eff_from, eff_to)
-                    if debug:
-                        print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} full {len(new_trades)}건 ({time.perf_counter()-t0:.2f}s)", flush=True)
-
-            except Exception as e:
-                log.warning(f"backtest {type_name} {ticker} 실패: {e}")
-                if debug:
-                    print(f"[backtest][debug] [{type_name}] ({i}/{total}) {mkt}/{ticker} FAIL: {e}", flush=True)
-                continue
-
-            # type2_2_opt: 처리 완료 후 사용한 파라미터 기록
-            if type_name == "type2_2_opt" and ticker in cur_opt_params:
-                updated_opt_params[ticker] = cur_opt_params[ticker]
-
-            if i % _progress_step == 0 or i == total:
-                _print_progress(_label, type_name, i, total, len(per_ticker_summary), type_t0)
-
-        processed_tickers = {str(r["ticker"]) for r in per_ticker_summary}
+        processed_tickers = {r["ticker"] for r in per_ticker_summary}
 
         all_path = out_dir / "_all.csv"
         new_all = pd.concat(all_trades, ignore_index=True) if all_trades else pd.DataFrame()
@@ -341,9 +465,10 @@ def run(cfg: config.Config, type_names: list[str], market: str,
                 new_summary = pd.concat([other_s, new_summary], ignore_index=True)
         if not new_summary.empty:
             csv_io.atomic_write(new_summary, summary_path)
-        # type2_2_opt: 사용한 파라미터 저장 (다음 실행 시 변경 감지에 사용)
+
         if type_name == "type2_2_opt" and updated_opt_params:
             _save_opt_params_used(out_dir, updated_opt_params)
+
         results[type_name] = {
             "tickers": len(per_ticker_summary),
             "skipped": skipped_count,
@@ -357,9 +482,7 @@ def run(cfg: config.Config, type_names: list[str], market: str,
             flush=True,
         )
 
-    # meta 저장 (기존 + 이번 갱신분 merge)
     _save_meta(bt_root, {**meta, **updated_meta})
-
     return results
 
 
@@ -405,7 +528,6 @@ def _resume(type_name: str, ticker: str, daily: pd.DataFrame,
             opt_minus_days: int | None = None):
     """기존 trades 에서 Portfolio 상태를 복원하고 prev_to 다음 날부터만 계산."""
     s = cfg.strategies
-    # 새 구간 시작일
     prev_to_date = pd.to_datetime(prev_to).date()
     new_start = prev_to_date + timedelta(days=1)
 
@@ -413,14 +535,12 @@ def _resume(type_name: str, ticker: str, daily: pd.DataFrame,
     if type_name in ("type0_2", "type1_2", "type2_2", "type2_2b", "type2_2_opt"):
         initial_cash = _initial_cash(cfg, currency)
     elif type_name == "type3":
-        # type3 initial_cash 는 누적 입금액 — 기존 buy × installment_amount
         installment_amount = _initial_cash(cfg, currency)
         n_buys = _count(existing_trades, "buy")
         initial_cash = installment_amount * n_buys
 
     pf = base.Portfolio.from_trades(ticker, type_name, initial_cash, existing_trades)
 
-    # type3 last_buy_date
     last_buy_date = None
     if type_name == "type3":
         buys = existing_trades[existing_trades["side"] == "buy"]

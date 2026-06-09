@@ -1481,3 +1481,19 @@
   2. `run.py:197` — ticker 처리 완전 순차
   3. `run.py:262` — resume 모드에서 기존 trades CSV 추가 읽기
 - **개선 방향** : daily CSV 캐시(→720회), ThreadPoolExecutor 병렬화, resume 모드 최적화
+
+### 백테스트 병목 3종 최적화 구현
+
+- **무엇을** : `src/candle/backtest/run.py` 전면 재구성으로 3가지 병목 동시 해결
+- **Optimization 1 — daily CSV 사전 캐시** (`_load_daily_cache`):
+  - type 루프 전에 모든 ticker daily CSV를 한 번만 로드 → `dict[ticker, DataFrame]` 캐시
+  - 기존: 12 type × 720 ticker = 8,640회 읽기 → 개선: 720회 (12배 감소)
+- **Optimization 2 — ticker 병렬 처리** (`_process_ticker` + `ThreadPoolExecutor`):
+  - 단일 ticker 처리 로직을 `_process_ticker()` 함수로 추출
+  - 결과를 `_TickerResult` dataclass로 반환 (thread-safe: 각 ticker 고유 파일에만 쓰기)
+  - `ThreadPoolExecutor(max_workers=min(8, cpu_count))` 로 type 내 ticker 병렬 실행
+  - `as_completed()` 로 결과 수집 → main thread에서 `updated_meta`, `all_trades` 취합
+- **Optimization 3 — trades CSV 사전 캐시** (`_load_trades_cache`):
+  - type 시작 시 기존 trades CSV 일괄 로드 → `dict[ticker, DataFrame]` 캐시
+  - `resume`/`skip` 모드의 per-ticker `csv_io.read()` 호출 제거
+- **예상 효과** : 5y period 기준 108s → 25~40s (2~4배 단축)
