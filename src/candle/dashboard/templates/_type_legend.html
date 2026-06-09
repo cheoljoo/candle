@@ -1,79 +1,94 @@
-{# 전략 type 이름 설명 범례 — 공통 partial #}
+{# 전략 type 이름 설명 범례 — 고정 좌측 사이드바 (처음부터 열림) #}
 {% if type_descriptions %}
-<details class="bg-slate-50 border rounded-lg text-xs text-slate-600 mt-0">
-  <summary class="px-4 py-2 cursor-pointer font-medium select-none hover:bg-slate-100 rounded-lg flex items-center gap-2">
-    <span>전략 코드 + Periods 설명 ▾</span>
-    {% if disabled_types %}
-    <span class="ml-2 px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 text-[10px] font-normal">
-      OFF: {{ disabled_types | join(', ') }}
-    </span>
-    {% endif %}
-  </summary>
-  <div class="px-4 py-3 space-y-4">
-    {# ── 전략 코드 설명 ── #}
-    <div>
-      <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">전략 코드</div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-1.5">
-        {% for code, (short, detail) in type_descriptions.items() %}
-        {% set is_on = code in enabled_types %}
-        <div class="flex gap-2 items-baseline">
-          <span class="font-mono font-semibold w-40 shrink-0
-            {% if is_on %}text-slate-800{% else %}text-slate-400 line-through{% endif %}">
-            {{ code }}
+<div x-data="{ legendOpen: true }" x-cloak>
+
+  {# 패널이 닫혔을 때만 보이는 열기 탭 #}
+  <button x-show="!legendOpen"
+          @click="legendOpen = true"
+          class="fixed left-0 top-40 z-50 bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold px-2 py-3 rounded-r-lg shadow-lg leading-tight">
+    전략<br>코드
+  </button>
+
+  {# 사이드바 패널 #}
+  <div x-show="legendOpen"
+       class="fixed left-0 top-0 h-screen z-50 w-80 bg-white shadow-2xl border-r border-slate-200 overflow-y-auto text-xs text-slate-600">
+    <div class="px-4 pt-4 pb-6 space-y-4">
+
+      {# 헤더 #}
+      <div class="flex items-center justify-between pb-2 border-b border-slate-200 sticky top-0 bg-white z-10 pt-1">
+        <h3 class="text-sm font-semibold text-slate-700">전략 코드 + Periods</h3>
+        <div class="flex items-center gap-2">
+          {% if disabled_types %}
+          <span class="px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 text-[10px]">
+            OFF: {{ disabled_types | join(', ') }}
           </span>
-          <span class="{% if not is_on %}text-slate-400{% endif %}">
-            <span class="font-medium">{{ short }}</span>
-            <span class="text-slate-400 ml-1">— {{ detail }}</span>
-          </span>
-          {% if is_on %}
-          <span class="ml-1 px-1 py-0 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 shrink-0">ON</span>
-          {% else %}
-          <span class="ml-1 px-1 py-0 rounded text-[10px] font-bold bg-slate-200 text-slate-500 shrink-0">OFF</span>
           {% endif %}
+          <button @click="legendOpen = false"
+                  class="text-slate-400 hover:text-slate-700 text-base font-bold leading-none px-1">✕</button>
         </div>
-        {% endfor %}
       </div>
-      <div class="mt-2 text-[11px] text-slate-400 flex items-center gap-1">
-        <span>⚙</span>
-        <span>ON/OFF 변경:</span>
-        <code class="bg-slate-100 px-1 rounded text-slate-600 font-mono">config/strategies.yml</code>
-        <span>→</span>
-        <code class="bg-slate-100 px-1 rounded text-slate-600 font-mono">enabled_types:</code>
-        <span>항목에서 추가/제거</span>
-      </div>
-    </div>
 
-    {# ── Periods 설명 ── #}
-    {% if periods_config %}
-    <div class="border-t pt-3">
-      <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">백테스트 기간 (Periods)</div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-1.5">
-        {% for p in periods_config %}
-        <div class="flex gap-2 items-baseline">
-          <span class="font-mono font-semibold text-slate-700 w-24 shrink-0">{{ p.label }}</span>
-          <span class="text-slate-500">
-            {% if p.rolling %}
-              최근 {{ p.rolling }} 롤링
-            {% elif p.from and p.to %}
-              {{ p.from }} ~ {{ p.to }}
-            {% elif p.from %}
-              {{ p.from }} ~ 현재
-            {% endif %}
-            {% if p.markets %}
-            <span class="ml-1 text-[10px] text-slate-400">[{{ p.markets | join('/') }}]</span>
-            {% endif %}
-          </span>
+      {# 전략 코드 목록 #}
+      <div>
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">전략 코드</div>
+        <div class="space-y-2">
+          {% for code, (short, detail) in type_descriptions.items() | sort(attribute='0') %}
+          {% set is_on = code in enabled_types %}
+          <div class="border-b border-slate-100 pb-1.5">
+            <div class="flex items-center gap-1.5 mb-0.5">
+              <span class="font-mono font-semibold w-40 shrink-0
+                {% if is_on %}text-slate-800{% else %}text-slate-400 line-through{% endif %}">{{ code }}</span>
+              {% if is_on %}
+              <span class="px-1 py-0 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">ON</span>
+              {% else %}
+              <span class="px-1 py-0 rounded text-[10px] font-bold bg-slate-200 text-slate-500">OFF</span>
+              {% endif %}
+            </div>
+            <div class="pl-1 {% if not is_on %}text-slate-400{% endif %}">
+              <span class="font-medium">{{ short }}</span>
+              <span class="text-slate-400 text-[10px]"> — {{ detail }}</span>
+            </div>
+          </div>
+          {% endfor %}
         </div>
-        {% endfor %}
+        <div class="mt-2 text-[11px] text-slate-400 flex flex-wrap gap-1 items-center">
+          <span>⚙ ON/OFF:</span>
+          <code class="bg-slate-100 px-1 rounded text-slate-600 font-mono">config/strategies.yml</code>
+          <code class="bg-slate-100 px-1 rounded text-slate-600 font-mono">enabled_types:</code>
+        </div>
       </div>
-      <div class="mt-2 text-[11px] text-slate-400 flex items-center gap-1">
-        <span>📅</span>
-        <span>기간 추가/변경:</span>
-        <code class="bg-slate-100 px-1 rounded text-slate-600 font-mono">config/periods.yml</code>
-      </div>
-    </div>
-    {% endif %}
 
+      {# Periods 목록 #}
+      {% if periods_config %}
+      <div class="border-t pt-3">
+        <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">백테스트 기간 (Periods)</div>
+        <div class="space-y-1.5">
+          {% for p in periods_config %}
+          <div class="flex gap-2 items-baseline">
+            <span class="font-mono font-semibold text-slate-700 w-24 shrink-0 text-[11px]">{{ p.label }}</span>
+            <span class="text-slate-500 text-[11px]">
+              {% if p.rolling %}최근 {{ p.rolling }} 롤링
+              {% elif p.from and p.to %}{{ p.from }} ~ {{ p.to }}
+              {% elif p.from %}{{ p.from }} ~ 현재
+              {% endif %}
+              {% if p.markets %}
+              <span class="text-[10px] text-slate-400">[{{ p.markets | join('/') }}]</span>
+              {% endif %}
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+        <div class="mt-2 text-[11px] text-slate-400">
+          📅 기간 추가/변경:
+          <code class="bg-slate-100 px-1 rounded text-slate-600 font-mono">config/periods.yml</code>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
   </div>
-</details>
+</div>
+
+{# x-cloak 스타일: Alpine 초기화 전 깜빡임 방지 #}
+<style>[x-cloak] { display: none !important; }</style>
 {% endif %}

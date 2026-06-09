@@ -16,6 +16,57 @@ from . import etf, kospi200, sp500
 log = logging.getLogger(__name__)
 
 
+def _record_membership_changes(
+    data_dir,
+    group: str,
+    market: str,
+    as_of: date,
+    new_members: pd.DataFrame,
+) -> int:
+    """이전 스냅샷과 비교해 진입/퇴출 변동을 membership_changes.csv 에 append."""
+    changes_path = paths.membership_changes_csv(data_dir)
+    mem_path = paths.membership_csv(data_dir, group)
+
+    # 직전 스냅샷 ticker set (오늘 이전 최신 날짜)
+    prev_tickers: set[str] = set()
+    prev_date: str = ""
+    if mem_path.exists():
+        mem = pd.read_csv(mem_path, dtype=str)
+        mem = mem[mem["from_date"] < as_of.isoformat()]
+        if not mem.empty:
+            prev_date = mem["from_date"].max()
+            prev_tickers = set(mem[mem["from_date"] == prev_date]["ticker"].tolist())
+
+    if not prev_tickers:
+        return 0  # 최초 실행 — 비교 대상 없음
+
+    cur_tickers = set(new_members["ticker"].astype(str).tolist())
+    name_map = dict(zip(new_members["ticker"].astype(str), new_members.get("name", pd.Series(dtype=str))))
+
+    entries = [
+        {"date": as_of.isoformat(), "group": group, "market": market,
+         "ticker": t, "name": name_map.get(t, ""), "event_type": "진입"}
+        for t in sorted(cur_tickers - prev_tickers)
+    ]
+    exits = [
+        {"date": as_of.isoformat(), "group": group, "market": market,
+         "ticker": t, "name": "", "event_type": "퇴출"}
+        for t in sorted(prev_tickers - cur_tickers)
+    ]
+    rows = entries + exits
+    if not rows:
+        return 0
+
+    new_df = pd.DataFrame(rows)
+    csv_io.upsert_by_keys(
+        changes_path,
+        new_df,
+        key_cols=["date", "group", "ticker", "event_type"],
+        sort_cols=["date", "group", "event_type", "ticker"],
+    )
+    return len(rows)
+
+
 def update(cfg: config.Config, as_of: date, small: bool = False, debug: bool = False) -> dict[str, int]:
     announce(
         "universe",
@@ -64,6 +115,9 @@ def update(cfg: config.Config, as_of: date, small: bool = False, debug: bool = F
             key_cols=["ticker", "from_date"],
             sort_cols=["from_date", "ticker"],
         )
+        n_changes = _record_membership_changes(data_dir, "KOSPI200", "KR", as_of, kr_members)
+        if debug and n_changes:
+            print(f"[universe][debug] KOSPI200 변동 {n_changes}건 기록")
     counts["KOSPI200"] = len(kr_members)
 
     # SP500
@@ -85,6 +139,9 @@ def update(cfg: config.Config, as_of: date, small: bool = False, debug: bool = F
             key_cols=["ticker", "from_date"],
             sort_cols=["from_date", "ticker"],
         )
+        n_changes = _record_membership_changes(data_dir, "SP500", "US", as_of, us_members)
+        if debug and n_changes:
+            print(f"[universe][debug] SP500 변동 {n_changes}건 기록")
     counts["SP500"] = len(us_members)
 
     # ETF KR

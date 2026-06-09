@@ -425,9 +425,9 @@
         </div>
       </div>
       <p class="text-xs text-slate-400 mb-2">헤더 클릭 → 정렬 · <span class="text-emerald-600 font-semibold">상위 3위</span> 초록 강조</p>
-      <div class="overflow-x-auto">
+      <div class="overflow-x-auto overflow-y-auto max-h-[60vh]">
         <table :id="'opt-tbl-' + curGroup" class="min-w-full text-sm border-collapse">
-          <thead class="bg-slate-100 text-slate-600 text-xs select-none">
+          <thead class="bg-slate-100 text-slate-600 text-xs select-none sticky top-0 z-10">
             <tr>
               <th class="px-3 py-2 text-center">#</th>
               <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200" @click="setSort('plus_days')">
@@ -525,9 +525,9 @@
           </div>
         </div>
 
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto overflow-y-auto max-h-[60vh]">
           <table class="min-w-full text-sm border-collapse">
-            <thead class="bg-slate-100 text-slate-600 text-xs select-none">
+            <thead class="bg-slate-100 text-slate-600 text-xs select-none sticky top-0 z-10">
               <tr>
                 <th class="px-3 py-2 text-left">종목코드</th>
                 <th class="px-3 py-2 text-left">종목명</th>
@@ -643,9 +643,9 @@
           </div>
         </div>
         <p class="text-xs text-slate-400 mb-2">헤더 클릭 → 정렬 · <span class="text-emerald-600 font-semibold">상위 3위</span> 초록 강조</p>
-        <div class="overflow-x-auto">
+        <div class="overflow-x-auto overflow-y-auto max-h-[60vh]">
           <table id="opt-ticker-tbl" class="min-w-full text-sm border-collapse">
-            <thead class="bg-slate-100 text-slate-600 text-xs select-none">
+            <thead class="bg-slate-100 text-slate-600 text-xs select-none sticky top-0 z-10">
               <tr>
                 <th class="px-3 py-2 text-center">#</th>
                 <th class="px-3 py-2 text-right cursor-pointer hover:bg-slate-200"

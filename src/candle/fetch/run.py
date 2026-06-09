@@ -500,6 +500,32 @@ def _us_batch_download_chunked(
     return result
 
 
+def _record_delisted(cfg: config.Config, ticker: str, group: str, market: str, detected: date) -> None:
+    """상장폐지/데이터 없음으로 판단된 ticker를 delisted.csv 에 기록."""
+    from ..storage import csv_io, paths
+    import pandas as pd
+
+    # instruments.csv 에서 종목명 조회
+    name = ""
+    try:
+        inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+        matches = inst[inst["ticker"].astype(str) == ticker]
+        if not matches.empty:
+            name = str(matches.iloc[0].get("name", ""))
+    except Exception:
+        pass
+
+    p = paths.delisted_csv(cfg.data_dir)
+    row = pd.DataFrame([{
+        "detected_date": detected.isoformat(),
+        "ticker": ticker,
+        "name": name,
+        "market": market,
+        "group_name": group,
+    }])
+    csv_io.upsert_by_keys(p, row, key_cols=["ticker"], sort_cols=["detected_date", "ticker"])
+
+
 def _fetch_us_batch(cfg: config.Config, rows: list, history_days: int,
                     today: date, workers: int, debug: bool,
                     from_date: date | None = None,
@@ -623,6 +649,12 @@ def _fetch_us_batch(cfg: config.Config, rows: list, history_days: int,
         df["pbr"] = pd.NA
         df["shares_out"] = pd.NA
         df["market_cap"] = pd.NA
+        _required = {"date", "open", "high", "low", "close", "volume"}
+        if not _required.issubset(df.columns):
+            log.warning(f"US/{ticker}: missing OHLCV columns {_required - set(df.columns)} — skip (possibly delisted)")
+            _record_delisted(cfg, ticker, group, "US", today)
+            skipped += 1
+            continue
         if not df.empty and (per is not None or mc is not None or so is not None):
             last_idx = df.index[-1]
             if per is not None:

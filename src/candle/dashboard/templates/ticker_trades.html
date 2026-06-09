@@ -83,7 +83,8 @@
 
   function buildSummary(types) {
     const rows = [];
-    for (const [tname, trades] of Object.entries(types)) {
+    for (const tname of Object.keys(types).sort()) {
+      const trades = types[tname];
       const buys = trades.filter(t => t.side === 'buy');
       const sells = trades.filter(t => t.side === 'sell');
       let wins = 0, losses = 0, holdDays = [];
@@ -130,7 +131,9 @@
     main.innerHTML = '';
 
     const types = data.types || {};
-    if (!Object.keys(types).length) {
+    // type명 기준 오름차순 정렬 (그래프·테이블·요약 모두 동일 순서)
+    const SORTED_TYPES = Object.keys(types).sort();
+    if (!SORTED_TYPES.length) {
       main.innerHTML = '<p class="text-slate-400">거래 데이터 없음</p>';
       return;
     }
@@ -227,7 +230,7 @@
     const periodList = data.period_list || [];
     const periodReturns = data.period_returns || {};
     if (periodList.length > 0 && Object.keys(periodReturns).length > 0) {
-      const allTypeNames = Object.keys(types);
+      const allTypeNames = SORTED_TYPES;
       const periodHeaders = periodList.map(p =>
         `<th class="text-right px-3 py-2 whitespace-nowrap font-normal text-slate-600" title="${p}">${p}</th>`
       ).join('');
@@ -267,7 +270,7 @@
     // ── 기간별 주식수 테이블 ──────────────────────────────────────────
     const periodSellQty = data.period_sell_qty || {};
     if (periodList.length > 0 && Object.keys(periodSellQty).length > 0) {
-      const allTypeNames = Object.keys(types);
+      const allTypeNames = SORTED_TYPES;
       function fmtQtyCell(first, lastBuy, final) {
         if (first == null && lastBuy == null) {
           return `<span class="text-slate-300" title="데이터 없음">—</span>`;
@@ -280,12 +283,11 @@
           ? 'text-emerald-700 font-semibold' : 'text-slate-500';
         const same = (lastBuy === final);
         const finalPart = (!same && final != null)
-          ? `<span class="text-slate-400 text-[10px] ml-0.5">(${final.toLocaleString('ko-KR')})</span>` : '';
-        // percentage change from first to final (or lastBuy if final is null)
-        const compareQty = final != null ? final : lastBuy;
+          ? `<span class="text-slate-400 text-[10px] ml-0.5">(최종:${final.toLocaleString('ko-KR')})</span>` : '';
+        // % = A→B 화살표 기준: (lastBuy - first) / first * 100
         let pctPart = '';
-        if (first != null && compareQty != null && first !== 0) {
-          const pct = (compareQty - first) / first * 100;
+        if (first != null && lastBuy != null && first !== 0) {
+          const pct = (lastBuy - first) / first * 100;
           const pctCls = pct > 0 ? 'text-emerald-600' : pct < 0 ? 'text-rose-600' : 'text-slate-400';
           const pctSign = pct >= 0 ? '+' : '';
           pctPart = ` <span class="${pctCls} text-[10px] font-semibold">(${pctSign}${pct.toFixed(1)}%)</span>`;
@@ -327,8 +329,9 @@
       main.insertAdjacentHTML('beforeend', periodQtyHtml);
     }
 
-    // 전략별 상세 거래 테이블 + 차트
-    for (const [tname, trades] of Object.entries(types)) {
+    // 전략별 상세 거래 테이블 + 차트 (type명 오름차순)
+    for (const tname of SORTED_TYPES) {
+      const trades = types[tname];
       const btn_id = `btn-${tname}`;
       const tbl_id = `tbl-${tname}`;
       const chart_id = `chart-${tname}`;

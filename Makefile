@@ -27,7 +27,8 @@ SENDMAIL ?= YES
         v2-gmail-etf v2-gmail-etf-dry \
         v2-market-signals v2-market-signals-us \
         v2-foreign-trading \
-        v2-smoke v2-all v2-all-kr v2-all-us
+        v2-smoke v2-all v2-all-kr v2-all-us \
+        v2-check-traceback
 
 # ── 도움말 ────────────────────────────────────────────────────────────────────
 help:
@@ -82,6 +83,9 @@ help:
 	@echo "기타:"
 	@echo "  make v2-smoke                       - 소규모 universe로 전체 파이프라인 검증"
 	@echo "  make v2-universe-small              - dev용 소규모 universe 빌드"
+	@echo ""
+	@echo "에러 감지:"
+	@echo "  make v2-check-traceback             - crontab.log에 Traceback 존재 시 owner에게 경보 메일 발송"
 	@echo ""
 	@echo "옵션:"
 	@echo "  DEBUG=--debug    단계별 상세 출력  (예: make v2-fetch DEBUG=--debug)"
@@ -346,3 +350,22 @@ v2-smoke:
 	uv run candle compare $(DEBUG)
 	uv run candle simulate --no-ai $(DEBUG)
 	uv run candle dashboard $(DEBUG)
+
+# ── Traceback 감지 → owner 경보 메일 ─────────────────────────────────────────
+# crontab 에서 파이프라인 실행 후 호출:
+#   make v2-all-kr >> crontab.log 2>&1 && make v2-check-traceback
+# crontab.log 에 Traceback 문자열이 있으면 프로세스가 비정상 종료된 것으로 판단하고
+# owner(config/recipients.yml) 에게 경보 메일을 발송합니다.
+v2-check-traceback:
+	@if [ ! -f crontab.log ]; then \
+		echo "crontab.log not found — skip traceback check"; \
+	elif grep -q "Traceback" crontab.log; then \
+		echo "[ALERT] Traceback detected in crontab.log — sending alert mail to owner"; \
+		uv run python -u gmail_sender.py \
+			--subject="[candle][ALERT][Traceback] $$(date +%Y-%m-%d) Traceback in crontab.log" \
+			--body-file="./crontab.log" \
+			--only-me \
+			--sendmail "YES"; \
+	else \
+		echo "No Traceback found in crontab.log — OK"; \
+	fi

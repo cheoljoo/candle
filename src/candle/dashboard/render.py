@@ -267,15 +267,22 @@ def render(cfg: config.Config, on_date: date,
     # compare.html
     tprint("[dashboard] compare.html 렌더...", flush=True)
     t0 = time.perf_counter()
+    # compare_top10 → 외부 JSON 파일로 분리 (compare.html/compare_full.html 에서 fetch로 로드)
+    top10_path = out_dir / "data" / "compare_top10.json"
+    top10_path.parent.mkdir(parents=True, exist_ok=True)
+    top10_path.write_text(json.dumps(compare_top10, ensure_ascii=False), encoding="utf-8")
+    # common_ctx에서 compare_top10 제거 → 템플릿에 빈 dict 전달 (JS로 동적 렌더링)
+    ctx_no_top10 = dict(common_ctx)
+    ctx_no_top10["compare_top10"] = {}
     cmp_tpl = env.get_template("compare.html")
-    (out_dir / "compare.html").write_text(cmp_tpl.render(**common_ctx), encoding="utf-8")
+    (out_dir / "compare.html").write_text(cmp_tpl.render(**ctx_no_top10), encoding="utf-8")
     tprint(f"[dashboard] compare.html 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     # compare_full.html (내림 순위 전체 종목 상세)
     tprint("[dashboard] compare_full.html 렌더...", flush=True)
     t0 = time.perf_counter()
     cmp_full_tpl = env.get_template("compare_full.html")
-    (out_dir / "compare_full.html").write_text(cmp_full_tpl.render(**common_ctx), encoding="utf-8")
+    (out_dir / "compare_full.html").write_text(cmp_full_tpl.render(**ctx_no_top10), encoding="utf-8")
     tprint(f"[dashboard] compare_full.html 완료 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     # decisions.html
@@ -299,11 +306,15 @@ def render(cfg: config.Config, on_date: date,
     tprint("[dashboard] history.html 렌더...", flush=True)
     t0 = time.perf_counter()
     etf_history = _load_etf_history(cfg)
+    membership_changes = _load_membership_changes(cfg)
+    delisted = _load_delisted(cfg)
     hist_tpl = env.get_template("history.html")
     hist_ctx = dict(common_ctx)
     hist_ctx["history"] = etf_history
+    hist_ctx["membership_changes"] = membership_changes
+    hist_ctx["delisted"] = delisted
     (out_dir / "history.html").write_text(hist_tpl.render(**hist_ctx), encoding="utf-8")
-    tprint(f"[dashboard] history.html 완료 — {len(etf_history)}건 ({time.perf_counter()-t0:.1f}s)", flush=True)
+    tprint(f"[dashboard] history.html 완료 — ETF {len(etf_history)}건 / 변동 {len(membership_changes)}건 / 상폐 {len(delisted)}건 ({time.perf_counter()-t0:.1f}s)", flush=True)
 
     # optimize.html
     tprint("[dashboard] optimize.html 렌더...", flush=True)
@@ -402,16 +413,34 @@ def _load_compare_top10(cfg: config.Config) -> dict:
     분모는 해당 (type, group) 의 전체 종목 수이고 0 수익률 종목도 포함해 정렬한다.
     각 종목에 매수/매도 횟수, 평균 보유일, 시가총액 순위도 포함한다.
     """
-    import math
-
     inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
     ticker_group: dict[str, str] = {}
     if not inst.empty:
-        for _, r in inst.iterrows():
-            ticker_group[str(r["ticker"])] = str(r.get("group_name", "UNKNOWN"))
+        ticker_group = dict(zip(inst["ticker"].astype(str),
+                                inst.get("group_name", pd.Series(dtype=str)).fillna("UNKNOWN").astype(str)))
 
     _FIXED_COLS = {"ticker", "name", "currency", "avg_return", "avg_mdd", "avg_win_rate",
                    "avg_hold_days", "group_name"}
+
+    # ── 시가총액 순위 로드 (한 번만, 모든 period 공통) ────────────────────────
+    rank_by_ticker: dict[str, int] = {}
+    for rank_file in [cfg.data_dir / "kospi_daily_rank.csv", cfg.data_dir / "sp500_daily_rank.csv"]:
+        if rank_file.exists():
+            try:
+                rdf = pd.read_csv(rank_file, index_col=0, low_memory=False)
+                if not rdf.empty:
+                    latest = rdf.iloc[-1]
+                    for col, val in latest.items():
+                        if pd.notna(val):
+                            rank_by_ticker[str(col)] = int(val)
+            except Exception:
+                pass
+
+    def _normalize_ticker(s: pd.Series) -> pd.Series:
+        return s.astype(str).where(
+            ~(s.astype(str).str.isdigit() & (s.astype(str).str.len() < 6)),
+            s.astype(str).str.zfill(6),
+        )
 
     result: dict = {}
 
@@ -427,108 +456,90 @@ def _load_compare_top10(cfg: config.Config) -> dict:
 
         # ── 백테스트 _summary.csv / _all.csv 에서 type별 통계 로드 ───────────
         bt_dir = paths.backtest_root(cfg.output_dir, label)
-        # { type_name → { ticker → (buy_count, sell_count) } }
         bt_buy_sell: dict[str, dict[str, tuple[int, int]]] = {}
         bt_first_sell_qty: dict[str, dict[str, int | None]] = {}
-        bt_last_sell_qty: dict[str, dict[str, int | None]] = {}   # 최종주식수: 마지막 BUY holding_qty
-        bt_final_qty: dict[str, dict[str, int | None]] = {}        # 마지막 가진 주식수: 마지막 행 holding_qty (SELL 포함)
+        bt_last_sell_qty: dict[str, dict[str, int | None]] = {}
+        bt_final_qty: dict[str, dict[str, int | None]] = {}
+
         if bt_dir.exists():
-            for type_dir in bt_dir.iterdir():
+            for type_dir in sorted(bt_dir.iterdir()):
                 if not type_dir.is_dir():
                     continue
                 tname = type_dir.name
+
+                # _summary.csv → buy_count / sell_count (벡터화)
                 sp = type_dir / "_summary.csv"
                 if sp.exists():
                     sdf = csv_io.read(sp)
                     if not sdf.empty and "ticker" in sdf.columns:
-                        bs_map: dict[str, tuple[int, int]] = {}
-                        for _, r in sdf.iterrows():
-                            tk = str(r["ticker"])
-                            bc = int(r.get("buy_count", 0) or 0)
-                            sc = int(r.get("sell_count", 0) or 0)
-                            bs_map[tk] = (bc, sc)
-                        bt_buy_sell[tname] = bs_map
-                # 처음주식수(첫 BUY qty) / 마지막 가진 주식수(마지막 holding_qty) from _all.csv
+                        tks = sdf["ticker"].astype(str)
+                        bcs = pd.to_numeric(sdf.get("buy_count",  pd.Series(0, index=sdf.index)), errors="coerce").fillna(0).astype(int)
+                        scs = pd.to_numeric(sdf.get("sell_count", pd.Series(0, index=sdf.index)), errors="coerce").fillna(0).astype(int)
+                        bt_buy_sell[tname] = dict(zip(tks, zip(bcs, scs)))
+
+                # _all.csv → first/last qty (완전 벡터화, O(n) groupby)
                 all_csv = type_dir / "_all.csv"
                 if all_csv.exists():
                     adf = csv_io.read(all_csv)
-                    if (not adf.empty and "ticker" in adf.columns
-                            and "side" in adf.columns
-                            and "qty" in adf.columns
-                            and "holding_qty" in adf.columns):
-                        all_sorted = adf.sort_values("date").copy()
-                        all_sorted["_tk"] = all_sorted["ticker"].astype(str).apply(
-                            lambda x: x.zfill(6) if x.isdigit() and len(x) < 6 else x
-                        )
-                        buys = all_sorted[all_sorted["side"] == "buy"]
-                        first_sq: dict[str, int | None] = {}
-                        last_sq: dict[str, int | None] = {}   # 최종주식수: 마지막 BUY holding_qty
-                        final_sq: dict[str, int | None] = {}  # 마지막 가진 주식수: 마지막 행 holding_qty
-                        for tk_raw, grp_all in all_sorted.groupby("_tk"):
-                            tk = str(tk_raw)
-                            buy_grp = buys[buys["_tk"] == tk]
-                            # 처음주식수 = 첫 BUY의 qty
-                            fv = pd.to_numeric(buy_grp["qty"].iloc[0], errors="coerce") if not buy_grp.empty else None
-                            # 최종주식수 = 마지막 BUY의 holding_qty
-                            lbv = pd.to_numeric(buy_grp["holding_qty"].iloc[-1], errors="coerce") if not buy_grp.empty else None
-                            # 마지막 가진 주식수 = 마지막 행(SELL 포함)의 holding_qty
-                            fhv = pd.to_numeric(grp_all["holding_qty"].iloc[-1], errors="coerce")
-                            first_sq[tk] = int(fv) if fv is not None and pd.notna(fv) else None
-                            last_sq[tk] = int(lbv) if lbv is not None and pd.notna(lbv) else None
-                            final_sq[tk] = int(fhv) if pd.notna(fhv) else None
-                        bt_first_sell_qty[tname] = first_sq
-                        bt_last_sell_qty[tname] = last_sq
-                        bt_final_qty[tname] = final_sq
+                    need = {"ticker", "side", "qty", "holding_qty"}
+                    if not adf.empty and need.issubset(adf.columns):
+                        adf = adf.sort_values("date").copy()
+                        adf["_tk"] = _normalize_ticker(adf["ticker"])
+                        adf["qty"]         = pd.to_numeric(adf["qty"],         errors="coerce")
+                        adf["holding_qty"] = pd.to_numeric(adf["holding_qty"], errors="coerce")
 
-        # ── 시가총액 순위 로드 (kospi/sp500 daily rank CSVs — 최신 날짜 기준) ──
-        rank_by_ticker: dict[str, int | None] = {}
-        for rank_file in [cfg.data_dir / "kospi_daily_rank.csv", cfg.data_dir / "sp500_daily_rank.csv"]:
-            if rank_file.exists():
-                try:
-                    rdf = pd.read_csv(rank_file, index_col=0)
-                    if not rdf.empty:
-                        latest = rdf.iloc[-1]
-                        for col, val in latest.items():
-                            if pd.notna(val):
-                                rank_by_ticker[str(col)] = int(val)
-                except Exception:
-                    pass
+                        buys = adf[adf["side"] == "buy"]
+
+                        # 첫 BUY qty per ticker
+                        first_buy_qty = buys.groupby("_tk")["qty"].first()
+                        # 마지막 BUY holding_qty per ticker
+                        last_buy_hq  = buys.groupby("_tk")["holding_qty"].last()
+                        # 마지막 행(SELL 포함) holding_qty per ticker
+                        final_hq     = adf.groupby("_tk")["holding_qty"].last()
+
+                        def _to_int_dict(s: pd.Series) -> dict[str, int | None]:
+                            return {k: (int(v) if pd.notna(v) else None) for k, v in s.items()}
+
+                        bt_first_sell_qty[tname] = _to_int_dict(first_buy_qty)
+                        bt_last_sell_qty[tname]  = _to_int_dict(last_buy_hq)
+                        bt_final_qty[tname]      = _to_int_dict(final_hq)
 
         period_data: dict = {}
         for type_col in type_cols:
-            type_data: dict = {}
-            bs_map_for_type = bt_buy_sell.get(type_col, {})
+            bs_map_for_type  = bt_buy_sell.get(type_col, {})
             fsq_map_for_type = bt_first_sell_qty.get(type_col, {})
             lsq_map_for_type = bt_last_sell_qty.get(type_col, {})
-            fq_map_for_type = bt_final_qty.get(type_col, {})
+            fq_map_for_type  = bt_final_qty.get(type_col, {})
+
+            type_data: dict = {}
             for grp_name, grp_df in pt_df.groupby("group_name"):
                 col_vals = pd.to_numeric(grp_df[type_col], errors="coerce")
-                n_total = len(grp_df)
-                # 전체 종목을 수익률 내림차순 정렬 (NaN 은 맨 아래)
-                sorted_df = grp_df.assign(_ret=col_vals).sort_values(
-                    "_ret", ascending=False, na_position="last"
-                )
-                ticker_list = []
-                for i, (_, row) in enumerate(sorted_df.iterrows()):
-                    tk = str(row["ticker"])
-                    bc, sc = bs_map_for_type.get(tk, (0, 0))
-                    hold_raw = row.get("avg_hold_days") if "avg_hold_days" in row.index else None
-                    hold_days = int(hold_raw) if hold_raw is not None and pd.notna(hold_raw) else None
-                    ticker_list.append({
-                        "rank": i + 1,
-                        "ticker": tk,
-                        "name": str(row["name"]),
-                        "return_pct": round(float(row["_ret"]), 2) if pd.notna(row["_ret"]) else 0.0,
-                        "buy_count": bc,
-                        "sell_count": sc,
-                        "avg_hold_days": hold_days,
-                        "market_rank": rank_by_ticker.get(tk),
+                sorted_df = grp_df.assign(ret_val=col_vals).sort_values(
+                    "ret_val", ascending=False, na_position="last"
+                ).reset_index(drop=True)
+
+                has_hold = "avg_hold_days" in sorted_df.columns
+                ticker_list = [
+                    {
+                        "rank":           i + 1,
+                        "ticker":         tk,
+                        "name":           str(row.name_col),
+                        "return_pct":     round(float(row.ret_val), 2) if pd.notna(row.ret_val) else 0.0,
+                        "buy_count":      bs_map_for_type.get(tk, (0, 0))[0],
+                        "sell_count":     bs_map_for_type.get(tk, (0, 0))[1],
+                        "avg_hold_days":  (int(row.avg_hold_days) if pd.notna(row.avg_hold_days) else None)
+                                          if has_hold else None,
+                        "market_rank":    rank_by_ticker.get(tk),
                         "first_sell_qty": fsq_map_for_type.get(tk),
-                        "last_sell_qty": lsq_map_for_type.get(tk),
-                        "final_qty": fq_map_for_type.get(tk),
-                    })
+                        "last_sell_qty":  lsq_map_for_type.get(tk),
+                        "final_qty":      fq_map_for_type.get(tk),
+                    }
+                    for i, (tk, row) in enumerate(
+                        (str(r.ticker), r) for r in sorted_df.rename(columns={"name": "name_col"}).itertuples(index=False)
+                    )
+                ]
                 type_data[str(grp_name)] = {
-                    "group_size": n_total,
+                    "group_size": len(grp_df),
                     "tickers": ticker_list,
                 }
             if type_data:
@@ -970,6 +981,47 @@ def _load_etf_history(cfg: config.Config) -> list[dict]:
         return []
     try:
         return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _load_membership_changes(cfg: config.Config) -> list[dict]:
+    """data/universe/membership_changes.csv 읽어 진입/퇴출 이력 반환 (최신순)."""
+    p = cfg.data_dir / "universe" / "membership_changes.csv"
+    if not p.exists():
+        return []
+    try:
+        df = csv_io.read(p)
+        df = df.sort_values("date", ascending=False)
+        df["name"] = df["name"].fillna("") if "name" in df.columns else ""
+        return df.to_dict(orient="records")
+    except Exception:
+        return []
+
+
+def _load_delisted(cfg: config.Config) -> list[dict]:
+    """data/universe/delisted.csv 읽어 상장폐지 감지 이력 반환 (최신순).
+    name 컬럼이 없거나 비어 있는 경우 instruments.csv 에서 보강.
+    """
+    p = cfg.data_dir / "universe" / "delisted.csv"
+    if not p.exists():
+        return []
+    try:
+        df = csv_io.read(p)
+        df = df.sort_values("detected_date", ascending=False)
+
+        # name 컬럼 보강
+        if "name" not in df.columns:
+            df["name"] = ""
+        try:
+            inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+            name_map = dict(zip(inst["ticker"].astype(str), inst["name"].astype(str)))
+            mask = df["name"].isna() | (df["name"].astype(str).str.strip() == "")
+            df.loc[mask, "name"] = df.loc[mask, "ticker"].astype(str).map(name_map).fillna("")
+        except Exception:
+            df["name"] = df["name"].fillna("")
+
+        return df.to_dict(orient="records")
     except Exception:
         return []
 

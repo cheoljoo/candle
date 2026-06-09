@@ -11,7 +11,7 @@ import pandas as pd
 def read(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
-    df = pd.read_csv(path)
+    df = pd.read_csv(path, low_memory=False)
     # KR ticker('000120' 등)는 선행 0 때문에 pandas 가 int 로 읽을 수 있음.
     # ticker 컬럼이 있으면 항상 str 로 강제.
     if "ticker" in df.columns:

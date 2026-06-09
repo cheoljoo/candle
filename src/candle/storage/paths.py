@@ -20,6 +20,14 @@ def etf_list_csv(data_dir: Path, market: str) -> Path:
     return data_dir / "universe" / f"etf_{market.lower()}.csv"
 
 
+def membership_changes_csv(data_dir: Path) -> Path:
+    return data_dir / "universe" / "membership_changes.csv"
+
+
+def delisted_csv(data_dir: Path) -> Path:
+    return data_dir / "universe" / "delisted.csv"
+
+
 def dividends_csv(data_dir: Path) -> Path:
     return data_dir / "events" / "dividends.csv"
 

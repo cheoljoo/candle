@@ -45,11 +45,11 @@
         ⬇ CSV 다운로드
       </button>
     </div>
-    <div class="overflow-x-auto">
+    <div class="overflow-x-auto overflow-y-auto max-h-[72vh]">
       <table id="ret-tbl" class="min-w-full text-sm border-collapse" data-sortable>
-        <thead class="bg-slate-100 text-slate-600 text-xs">
+        <thead class="bg-slate-100 text-slate-600 text-xs sticky top-0 z-10">
           <tr>
-            <th class="text-left px-3 py-2 sticky left-0 bg-slate-100">종목</th>
+            <th class="text-left px-3 py-2 sticky left-0 bg-slate-100 z-20">종목</th>
             <th class="text-left px-3 py-2">그룹</th>
             {% if show_rank %}
             <th class="text-right px-3 py-2 whitespace-nowrap">RANK</th>

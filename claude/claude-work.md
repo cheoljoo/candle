@@ -1416,3 +1416,68 @@
 
 **7. 기간별 주식수 % 변화 표시** (`ticker_trades.html`)
   - `fmtQtyCell(first, last, final)` — `(+/-N.N%)` 색상 표시: 증가=초록, 감소=빨강
+
+---
+
+## 2026-06-09
+
+### Makefile v2-check-traceback 타겟 추가
+
+- **무엇을** : crontab 실행 후 `crontab.log`에 `Traceback`이 존재하면 owner에게 alert 메일 전송
+- **수정** (`Makefile`) : `v2-check-traceback` 타겟 추가 — `grep -q "Traceback"` 후 `gmail_sender.py --only-me --sendmail YES` 호출. 파일 없으면 skip 메시지만 출력
+- **crontab 권장 형식** : `... bash candle.sh kr > crontab.log 2>&1 ; make v2-check-traceback` — `&&` 대신 `;` 사용하여 pipeline 실패 시에도 traceback 체크 항상 실행
+
+### fetch/run.py — 상장폐지 ticker KeyError 수정
+
+- **문제** : `$BK`(BNY Mellon) 등 상장폐지 ticker에 대해 yfinance가 OHLCV 컬럼 없는 DataFrame 반환 → `df.empty`는 False → 컬럼 선택 시 `KeyError: 'open', 'high', 'low', 'close', 'volume' not in index` 발생
+- **수정** (`src/candle/fetch/run.py`) :
+  - `_required` 컬럼 체크 추가 — `_required.issubset(df.columns)` 실패 시 `_record_delisted()` 호출 후 `continue`
+  - `_record_delisted(cfg, ticker, group, market, detected)` 함수 추가 — `instruments.csv`에서 종목명 조회 후 `data/universe/delisted.csv`에 upsert
+- **수정** (`src/candle/storage/paths.py`) : `membership_changes_csv()`, `delisted_csv()` 경로 함수 추가
+
+### 이력 페이지 재구성 — 구성종목 변동/상장폐지 이력 추가
+
+- **무엇을** : 대시보드 `history.html`을 3섹션으로 재구성
+  1. **ETF 등록 이력** (기존 내용 그대로)
+  2. **구성종목 변동 이력** — KOSPI200/SP500 진입·퇴출 이력 (`membership_changes.csv`)
+  3. **상장폐지 감지 이력** — fetch 중 감지된 상장폐지 종목 (`delisted.csv`)
+- **수정** (`src/candle/universe/build.py`) : `_record_membership_changes()` — 기존 스냅샷과 비교하여 진입/퇴출 이벤트 `membership_changes.csv`에 누적 기록
+- **수정** (`src/candle/dashboard/render.py`) : `_load_membership_changes()`, `_load_delisted()` 추가. `_load_delisted()`는 `instruments.csv`에서 누락 종목명 백필
+- **수정** (`src/candle/dashboard/templates/history.html`) : Alpine.js 앱 3개로 분리 (`etfHistoryApp`, `membershipApp`, `delistedApp`)
+- **데이터 백필** : 기존 스냅샷에서 KOSPI200 228건 변동 이력 생성, `delisted.csv`에 `BK` 1건 추가
+
+### 상장폐지 이력 종목명 누락 수정
+
+- **문제** : `delisted.csv` 기존 행에 `name` 컬럼 없음 + `_load_delisted()`에서 백필 미작동
+- **수정** : `_record_delisted()` — `instruments.csv`에서 종목명 조회하여 write 시점에 저장
+- **수정** : `_load_delisted()` — `name` 컬럼 결측 시 `instruments.csv` 기반 백필 추가
+
+### DtypeWarning 제거
+
+- **문제** : 대용량 혼합타입 CSV 읽기 시 `DtypeWarning` 20+ 회 반복 출력
+- **수정** (`src/candle/storage/csv_io.py`) : `pd.read_csv(path)` → `pd.read_csv(path, low_memory=False)`
+
+### compare top-10% 성능 개선 (740s → 72s)
+
+- **문제** : `_load_compare_top10()` 740초 소요 — `iterrows()` O(n²) 루프, rank CSV를 period 루프 안에서 반복 로드
+- **수정** (`src/candle/dashboard/render.py`) :
+  - `ticker_group` 딕셔너리를 `iterrows()` 대신 `dict(zip(...))` 으로 생성
+  - rank CSV 로딩을 period 루프 밖으로 이동 (한 번만 읽기)
+  - `_all.csv` 처리 전면 벡터화 : `groupby("_tk")["qty"].first()`, `groupby("_tk")["holding_qty"].last()` 등
+  - `_summary.csv` 처리 벡터화 : `dict(zip(tks, zip(bcs, scs)))`
+  - `itertuples()` 컬럼명 충돌 수정 : `_ret` → `ret_val`, `name` → `name_col`
+- **결과** : 740s → 72s (약 10배 단축)
+
+### AAPL/GOOG "possibly delisted" 오탐 분석
+
+- **확인** : yfinance는 단일일 배치 윈도우에 데이터가 없으면 `[ERROR]` 출력 + 빈 DataFrame 반환 → `df.empty` 체크에서 skip됨 → `_record_delisted()` 호출 없음. AAPL/GOOG는 실제 상장폐지가 아니며 delisted.csv에 기록되지 않음
+- **결론** : 기존 로직 정상. OHLCV 컬럼 없는 non-empty DataFrame(=실제 상장폐지 케이스)만 `_record_delisted()` 호출
+
+### 백테스트 병목 분석
+
+- **분석** : `candle-v2-kr-2026_06_02.log` 기준 — `5y` period + `type2_2/type2_2b/type2_2_opt/type1_2`가 각 105~108s로 가장 느림. `skip=0`(전 ticker 재처리) 원인: 5y end date가 매일 오늘로 갱신되어 meta 불일치 → 항상 `resume` 모드
+- **코드 병목 3곳** :
+  1. `run.py:205` — daily CSV를 type마다 반복 읽기 (12 type × 720 ticker = 8,640회)
+  2. `run.py:197` — ticker 처리 완전 순차
+  3. `run.py:262` — resume 모드에서 기존 trades CSV 추가 읽기
+- **개선 방향** : daily CSV 캐시(→720회), ThreadPoolExecutor 병렬화, resume 모드 최적화

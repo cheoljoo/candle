@@ -191,9 +191,8 @@
     {% endif %}
   </section>
 
-  {# ── 수익률 Top 10% 상세 내역 ──────────────────────────────────────── #}
-  <section class="bg-white rounded-lg shadow-sm p-4"
-           x-data="{ top10_tab: '{{ compare_period_list[0] if compare_period_list else '' }}' }">
+  {# ── 수익률 Top 10% 상세 내역 — JS 동적 렌더링 (data/compare_top10.json 로드) #}
+  <section class="bg-white rounded-lg shadow-sm p-4" id="top10-section">
     <div class="flex items-center gap-3 mb-1">
       <h2 class="text-base font-semibold">📈 수익률 Top 10% 상세 내역</h2>
       <a href="compare_full.html"
@@ -201,106 +200,146 @@
         📋 내림 순위 전체 종목 상세 →
       </a>
     </div>
-    <p class="text-xs text-slate-400 mb-3">그룹별 수익률 상위 10% 종목을 표시합니다. 전체 목록은 우측 링크에서 확인하세요.</p>
+    <p class="text-xs text-slate-400 mb-3">그룹별 수익률 상위 10% 종목을 표시합니다.</p>
     {% if compare_period_list %}
-    {# 1단계 탭: 기간 #}
-    <div class="border-b mb-4 flex gap-1 flex-wrap text-sm">
+    <div class="border-b mb-4 flex gap-1 flex-wrap text-sm" id="top10-period-tabs">
       {% for p in compare_period_list %}
-      <button @click="top10_tab='{{ p }}'"
-              :class="top10_tab==='{{ p }}' ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500 hover:text-slate-700'"
-              class="px-3 py-2 whitespace-nowrap">{{ p }}</button>
+      <button data-top10-period="{{ p }}"
+              id="top10-tab-{{ p }}"
+              class="px-3 py-2 whitespace-nowrap text-slate-500 hover:text-slate-700">{{ p }}</button>
       {% endfor %}
     </div>
-
-    {% for period, type_map in compare_top10.items() %}
-    <div x-show="top10_tab==='{{ period }}'"
-         x-data="{ selType: '{{ type_map.keys()|list|first if type_map else '' }}' }">
-      {% if type_map %}
-      {# 2단계 탭: 전략 (Type) #}
-      <div class="flex gap-1 flex-wrap mb-4 bg-slate-100 rounded-lg p-1">
-        {% for type_col in type_map %}
-        <button @click="selType='{{ type_col }}'"
-                :class="selType==='{{ type_col }}' ? 'bg-white shadow-sm text-indigo-700 font-semibold' : 'text-slate-500 hover:text-slate-700'"
-                class="px-4 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors">{{ type_col }}</button>
-        {% endfor %}
-      </div>
-
-      {% for type_col, group_map in type_map.items() %}
-      <div x-show="selType==='{{ type_col }}'">
-        {# 1x4 레이아웃: ETF_KR → ETF_US → KOSPI200 → SP500 순으로 세로 배치 #}
-        <div class="space-y-3">
-          {% for grp_name in ["ETF_KR", "ETF_US", "KOSPI200", "SP500"] %}
-          {% if grp_name in group_map %}{% set grp_data = group_map[grp_name] %}
-          {% set hdr_cls = "bg-amber-50 border-b border-amber-100" if grp_name in ["ETF_KR", "ETF_US"] else "bg-sky-50 border-b border-sky-100" %}
-          <div class="border border-slate-200 rounded-lg overflow-hidden">
-            {%- set n_top10 = [[grp_data.group_size // 10, 1] | max, grp_data.group_size] | min %}
-            <div class="flex items-center justify-between px-3 py-2 {{ hdr_cls }}">
-              <span class="font-semibold text-sm text-slate-800">{{ grp_name }}</span>
-              <span class="text-xs text-slate-500">상위 {{ n_top10 }}개 / 전체 {{ grp_data.group_size }}개 (Top 10%)</span>
-            </div>
-            <div class="overflow-x-auto max-h-96">
-              <table class="min-w-full text-xs">
-                <thead class="bg-white text-slate-500 border-b border-slate-100 sticky top-0">
-                  <tr>
-                    <th class="text-right px-2 py-1.5 w-6 font-medium">#</th>
-                    <th class="text-left px-2 py-1.5 font-medium">종목</th>
-                    <th class="text-left px-2 py-1.5 font-medium">종목명</th>
-                    <th class="text-right px-2 py-1.5 font-medium">수익률</th>
-                    <th class="text-right px-2 py-1.5 font-medium">매수</th>
-                    <th class="text-right px-2 py-1.5 font-medium">매도</th>
-                    <th class="text-right px-2 py-1.5 font-medium">보유일</th>
-                    <th class="text-right px-2 py-1.5 font-medium" title="시가자본액 순위">RANK</th>
-                    <th class="text-right px-2 py-1.5 font-medium" title="첫 번째 BUY 시 매수한 주수">처음주식수</th>
-                    <th class="text-right px-2 py-1.5 font-medium" title="최종주식수: 마지막 BUY 후 보유수량 / (마지막 가진 주식수): 마지막 SELL까지 고려한 최종 남은 주식수">최종주식수<br><span class="font-normal text-slate-400 text-[10px]">(마지막 가진 주식수)</span></th>
-                    <th class="text-center px-2 py-1.5 font-medium">거래이력</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for row in grp_data.tickers[:n_top10] %}
-                  <tr class="border-t border-slate-100 hover:bg-slate-50">
-                    <td class="px-2 py-1.5 text-right text-slate-400 tabular-nums">{{ row.rank }}</td>
-                    <td class="px-2 py-1.5 font-mono text-slate-700">{{ row.ticker }}</td>
-                    <td class="px-2 py-1.5 text-slate-600 max-w-[7rem] truncate" title="{{ row.name }}">{{ row.name }}</td>
-                    <td class="px-2 py-1.5 text-right tabular-nums font-semibold {% if row.return_pct >= 0 %}text-emerald-700{% else %}text-rose-700{% endif %}">{{ "%.2f"|format(row.return_pct) }}%</td>
-                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-500">{{ row.buy_count if row.buy_count else '—' }}</td>
-                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-500">{{ row.sell_count if row.sell_count else '—' }}</td>
-                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{% if row.avg_hold_days is not none %}{{ row.avg_hold_days }}일{% else %}—{% endif %}</td>
-                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{% if row.market_rank is not none %}{{ row.market_rank }}{% else %}—{% endif %}</td>
-                    {% if row.first_sell_qty is not none and row.last_sell_qty is not none %}
-                    <td class="px-2 py-1.5 text-right tabular-nums {% if row.first_sell_qty > row.last_sell_qty %}text-rose-700 font-semibold{% else %}text-slate-400{% endif %}">{{ row.first_sell_qty }}</td>
-                    <td class="px-2 py-1.5 text-right tabular-nums {% if row.last_sell_qty > row.first_sell_qty %}text-emerald-700 font-semibold{% else %}text-slate-400{% endif %}">{{ row.last_sell_qty }}{% if row.final_qty is not none and row.final_qty != row.last_sell_qty %}<span class="text-slate-400 text-[11px] font-normal ml-0.5">({{ row.final_qty }})</span>{% endif %}</td>
-                    {% elif row.first_sell_qty is not none %}
-                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">{{ row.first_sell_qty }}</td>
-                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-400">—</td>
-                    {% else %}
-                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-300">—</td>
-                    <td class="px-2 py-1.5 text-right tabular-nums text-slate-300">—</td>
-                    {% endif %}
-                    <td class="px-2 py-1.5 text-center">
-                      <a href="ticker_trades.html#{{ row.ticker }}:{{ type_col }}" class="inline-block text-xs px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded border border-indigo-200 hover:bg-indigo-100 hover:text-indigo-800">거래이력</a>
-                    </td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          {% else %}
-          <div class="border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-slate-400 text-sm py-6">{{ grp_name }} 데이터 없음</div>
-          {% endif %}
-          {% endfor %}
-        </div>
-      </div>
-      {% endfor %}
-      {% else %}
-      <p class="text-sm text-slate-400 py-4">이 기간에 데이터가 없습니다.</p>
-      {% endif %}
-    </div>
-    {% endfor %}
-    {% else %}
-    <p class="text-sm text-slate-500">compare 결과가 없습니다.</p>
     {% endif %}
+    <div id="top10-loading" class="text-slate-400 text-sm py-4">데이터 로딩 중...</div>
+    <div id="top10-content" style="display:none"></div>
   </section>
+
+  <script>
+  (function() {
+    const GROUPS = ['ETF_KR', 'ETF_US', 'KOSPI200', 'SP500'];
+    let top10Data = null;
+    let curPeriod = '{{ compare_period_list[0] if compare_period_list else "" }}';
+    let curType = '';
+
+    function n(v, fallback) { return v != null ? v : (fallback != null ? fallback : '—'); }
+    function pct(v) { return v != null ? (v >= 0 ? `<span class="text-emerald-700 font-semibold">${v.toFixed(2)}%</span>` : `<span class="text-rose-700 font-semibold">${v.toFixed(2)}%</span>`) : '—'; }
+
+    function renderQty(first, last, final_) {
+      if (first == null && last == null) return '<span class="text-slate-300">—</span>';
+      const fCls = (first != null && last != null && first > last) ? 'text-rose-700 font-semibold' : 'text-slate-400';
+      const lCls = (first != null && last != null && last > first) ? 'text-emerald-700 font-semibold' : 'text-slate-400';
+      const fin = (final_ != null && final_ !== last) ? `<span class="text-slate-400 text-[10px]">(${final_})</span>` : '';
+      return `<span class="${fCls}">${n(first)}</span> / <span class="${lCls}">${n(last)}</span>${fin}`;
+    }
+
+    function renderTable(typeCol, grpData, showAll) {
+      const gs = grpData.group_size || 0;
+      const n10 = showAll ? gs : Math.min(Math.max(Math.floor(gs / 10), 1), gs);
+      const isEtf = ['ETF_KR','ETF_US'].includes(grpData._grp);
+      const hdrCls = isEtf ? 'bg-amber-50 border-b border-amber-100' : 'bg-sky-50 border-b border-sky-100';
+      const rows = (grpData.tickers || []).slice(0, n10).map((r, i) => {
+        const isTop = !showAll && (i < n10);
+        const rowCls = showAll && isTop ? 'bg-emerald-50/30' : '';
+        const rankLabel = showAll && isTop ? `<span class="text-emerald-600 font-bold">★</span> ${r.rank}` : (r.rank || '—');
+        return `<tr class="border-t border-slate-100 hover:bg-slate-50 ${rowCls}">
+          <td class="px-2 py-1.5 text-right text-slate-400 tabular-nums text-xs">${rankLabel}</td>
+          <td class="px-2 py-1.5 font-mono text-slate-700 text-xs">${r.ticker||'—'}</td>
+          <td class="px-2 py-1.5 text-slate-600 max-w-[7rem] truncate text-xs" title="${r.name||''}">${r.name||'—'}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-xs">${pct(r.return_pct)}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-slate-500 text-xs">${r.buy_count||'—'}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-slate-500 text-xs">${r.sell_count||'—'}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-slate-400 text-xs">${r.avg_hold_days != null ? r.avg_hold_days+'일' : '—'}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-slate-400 text-xs">${r.market_rank != null ? r.market_rank : '—'}</td>
+          <td class="px-2 py-1.5 text-right tabular-nums text-xs">${renderQty(r.first_sell_qty, r.last_sell_qty, r.final_qty)}</td>
+          <td class="px-2 py-1.5 text-center text-xs">
+            <a href="ticker_trades.html#${r.ticker}:${typeCol}" class="inline-block px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded border border-indigo-200 hover:bg-indigo-100 text-xs">거래이력</a>
+          </td>
+        </tr>`;
+      }).join('');
+      return `<div class="border border-slate-200 rounded-lg overflow-hidden mb-3">
+        <div class="flex items-center justify-between px-3 py-2 ${hdrCls}">
+          <span class="font-semibold text-sm text-slate-800">${grpData._grp}</span>
+          <span class="text-xs text-slate-500">상위 ${n10}개 / 전체 ${gs}개${showAll ? '' : ' (Top 10%)'}</span>
+        </div>
+        <div class="overflow-x-auto overflow-y-auto max-h-96">
+          <table class="min-w-full text-xs">
+            <thead class="bg-white text-slate-500 border-b border-slate-100 sticky top-0">
+              <tr>
+                <th class="text-right px-2 py-1.5 font-medium">#</th>
+                <th class="text-left px-2 py-1.5 font-medium">종목</th>
+                <th class="text-left px-2 py-1.5 font-medium">종목명</th>
+                <th class="text-right px-2 py-1.5 font-medium">수익률</th>
+                <th class="text-right px-2 py-1.5 font-medium">매수</th>
+                <th class="text-right px-2 py-1.5 font-medium">매도</th>
+                <th class="text-right px-2 py-1.5 font-medium">보유일</th>
+                <th class="text-right px-2 py-1.5 font-medium">RANK</th>
+                <th class="text-right px-2 py-1.5 font-medium">처음/최종주식수</th>
+                <th class="text-center px-2 py-1.5 font-medium">거래이력</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+    }
+
+    function renderPeriodType(showAll) {
+      if (!top10Data) return;
+      const pData = top10Data[curPeriod] || {};
+      const types = Object.keys(pData).sort();
+      if (!types.length) {
+        document.getElementById('top10-content').innerHTML = '<p class="text-slate-400 text-sm py-4">이 기간에 데이터가 없습니다.</p>';
+        return;
+      }
+      if (!curType || !pData[curType]) curType = types[0];
+
+      // 전략 탭
+      const typeTabs = types.map(t => `
+        <button onclick="window._top10SelectType('${t}')"
+                class="px-4 py-1.5 rounded-md text-sm whitespace-nowrap transition-colors ${t===curType ? 'bg-white shadow-sm text-indigo-700 font-semibold' : 'text-slate-500 hover:text-slate-700'}">
+          ${t}
+        </button>`).join('');
+
+      // 그룹 테이블
+      const typeData = pData[curType] || {};
+      const tables = GROUPS.map(g => {
+        if (!typeData[g]) return `<div class="border border-dashed border-slate-200 rounded-lg flex items-center justify-center text-slate-400 text-sm py-6 mb-3">${g} 데이터 없음</div>`;
+        return renderTable(curType, {...typeData[g], _grp: g}, showAll);
+      }).join('');
+
+      document.getElementById('top10-content').innerHTML = `
+        <div class="flex gap-1 flex-wrap mb-4 bg-slate-100 rounded-lg p-1">${typeTabs}</div>
+        <div>${tables}</div>`;
+    }
+
+    function updatePeriodTabs() {
+      document.querySelectorAll('[data-top10-period]').forEach(btn => {
+        const active = btn.dataset.top10Period === curPeriod;
+        btn.className = `px-3 py-2 whitespace-nowrap ${active ? 'border-b-2 border-indigo-600 text-indigo-700 font-semibold' : 'text-slate-500 hover:text-slate-700'}`;
+      });
+    }
+    window._top10SelectType = function(t) { curType = t; renderPeriodType(false); };
+    window._top10SelectPeriod = function(p) { curPeriod = p; curType = ''; updatePeriodTabs(); renderPeriodType(false); };
+
+    // 기간 탭 버튼에 이벤트 연결
+    document.querySelectorAll('[data-top10-period]').forEach(btn => {
+      btn.addEventListener('click', () => window._top10SelectPeriod(btn.dataset.top10Period));
+    });
+
+    fetch('data/compare_top10.json')
+      .then(r => r.json())
+      .then(d => {
+        top10Data = d;
+        document.getElementById('top10-loading').style.display = 'none';
+        document.getElementById('top10-content').style.display = '';
+        updatePeriodTabs();
+        renderPeriodType(false);
+      })
+      .catch(() => {
+        document.getElementById('top10-loading').textContent = 'Top 10% 데이터를 불러오지 못했습니다.';
+      });
+  })();
+  </script>
 
   <p class="text-xs text-slate-400">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
 </main>

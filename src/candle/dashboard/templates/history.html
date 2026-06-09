@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕯️</text></svg>">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ETF 등록 이력 — Candle</title>
+  <title>이력 — Candle</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
@@ -16,7 +16,7 @@
 <header class="border-b bg-white">
   <div class="max-w-screen-2xl mx-auto px-4 py-4 flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-semibold">Candle Dashboard — ETF 등록 이력</h1>
+      <h1 class="text-xl font-semibold">Candle Dashboard — 이력</h1>
       <p class="text-xs text-slate-500">기준일 {{ as_of }} · 생성 {{ generated_at }}</p>
     </div>
   </div>
@@ -26,105 +26,286 @@
 
 <script>
 const HISTORY_DATA = {{ history | tojson }};
+const MEMBERSHIP_CHANGES = {{ membership_changes | tojson }};
+const DELISTED_DATA = {{ delisted | tojson }};
 </script>
 
-<div class="max-w-screen-xl mx-auto px-4 py-8"
-     x-data="historyApp()"
-     x-init="init()">
+<div class="max-w-screen-xl mx-auto px-4 py-8">
 
-  {# ── 요약 카드 ── #}
-  <div class="flex gap-4 mb-6 flex-wrap">
-    <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
-      <div class="text-xs text-slate-400 mb-1">총 등록 종목</div>
-      <div class="text-2xl font-bold text-slate-800" x-text="total + '건'"></div>
-    </div>
-    <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
-      <div class="text-xs text-slate-400 mb-1">KR ETF</div>
-      <div class="text-2xl font-bold text-emerald-600" x-text="countKR + '건'"></div>
-    </div>
-    <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
-      <div class="text-xs text-slate-400 mb-1">US ETF</div>
-      <div class="text-2xl font-bold text-blue-600" x-text="countUS + '건'"></div>
-    </div>
-    <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
-      <div class="text-xs text-slate-400 mb-1">등록자 수</div>
-      <div class="text-2xl font-bold text-slate-600" x-text="uniqueRequestors + '명'"></div>
-    </div>
-  </div>
+  {# ════════════════════════════════════════════════════════════
+     1. ETF 등록 이력
+     ════════════════════════════════════════════════════════════ #}
+  <h2 class="text-lg font-bold text-slate-700 mb-4 flex items-center gap-2">
+    ETF 등록 이력
+    <span class="text-xs font-normal text-slate-400">메일로 요청된 ETF 종목 등록 기록</span>
+  </h2>
 
-  {# ── 필터 바 ── #}
-  <div class="bg-white border rounded-xl px-4 py-3 mb-4 flex gap-4 flex-wrap items-center shadow-sm">
-    <div class="flex items-center gap-2">
-      <label class="text-xs text-slate-500 font-medium">시장</label>
-      <select x-model="filterMarket"
-              class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
-        <option value="">전체</option>
-        <option value="KR">KR</option>
-        <option value="US">US</option>
-      </select>
-    </div>
-    <div class="flex items-center gap-2">
-      <label class="text-xs text-slate-500 font-medium">등록자</label>
-      <select x-model="filterBy"
-              class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
-        <option value="">전체</option>
-        <template x-for="r in requestors" :key="r">
-          <option :value="r" x-text="r"></option>
-        </template>
-      </select>
-    </div>
-    <div class="flex items-center gap-2 ml-auto">
-      <span class="text-xs text-slate-400" x-text="filtered.length + '건 표시'"></span>
-    </div>
-  </div>
+  <div x-data="etfHistoryApp()" x-init="init()">
 
-  {# ── 이력 테이블 ── #}
-  <div class="bg-white border rounded-xl shadow-sm overflow-hidden">
-    <table class="w-full text-sm" data-sortable>
-      <thead>
-        <tr class="bg-slate-50 border-b">
-          <th class="px-4 py-3 text-left font-semibold text-slate-600 w-40">등록 일시</th>
-          <th class="px-4 py-3 text-left font-semibold text-slate-600">등록자</th>
-          <th class="px-4 py-3 text-left font-semibold text-slate-600 w-24">Ticker</th>
-          <th class="px-4 py-3 text-left font-semibold text-slate-600">종목명</th>
-          <th class="px-4 py-3 text-left font-semibold text-slate-600 w-16">시장</th>
-          <th class="px-4 py-3 text-left font-semibold text-slate-600 w-24">그룹</th>
-        </tr>
-      </thead>
-      <tbody>
-        <template x-if="filtered.length === 0">
-          <tr>
-            <td colspan="6" class="px-4 py-12 text-center text-slate-400 text-sm">이력이 없습니다.</td>
+    {# 요약 카드 #}
+    <div class="flex gap-4 mb-6 flex-wrap">
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">총 등록 종목</div>
+        <div class="text-2xl font-bold text-slate-800" x-text="total + '건'"></div>
+      </div>
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">KR ETF</div>
+        <div class="text-2xl font-bold text-emerald-600" x-text="countKR + '건'"></div>
+      </div>
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">US ETF</div>
+        <div class="text-2xl font-bold text-blue-600" x-text="countUS + '건'"></div>
+      </div>
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">등록자 수</div>
+        <div class="text-2xl font-bold text-slate-600" x-text="uniqueRequestors + '명'"></div>
+      </div>
+    </div>
+
+    {# 필터 바 #}
+    <div class="bg-white border rounded-xl px-4 py-3 mb-4 flex gap-4 flex-wrap items-center shadow-sm">
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-slate-500 font-medium">시장</label>
+        <select x-model="filterMarket"
+                class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
+          <option value="">전체</option>
+          <option value="KR">KR</option>
+          <option value="US">US</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-slate-500 font-medium">등록자</label>
+        <select x-model="filterBy"
+                class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
+          <option value="">전체</option>
+          <template x-for="r in requestors" :key="r">
+            <option :value="r" x-text="r"></option>
+          </template>
+        </select>
+      </div>
+      <div class="flex items-center gap-2 ml-auto">
+        <span class="text-xs text-slate-400" x-text="filtered.length + '건 표시'"></span>
+      </div>
+    </div>
+
+    <div class="bg-white border rounded-xl shadow-sm overflow-hidden mb-12">
+      <table class="w-full text-sm" data-sortable>
+        <thead>
+          <tr class="bg-slate-50 border-b">
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-40">등록 일시</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600">등록자</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-24">Ticker</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600">종목명</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-16">시장</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-24">그룹</th>
           </tr>
-        </template>
-        <template x-for="(row, i) in filtered" :key="i">
-          <tr class="border-b last:border-0 hover:bg-slate-50 transition-colors">
-            <td class="px-4 py-3 font-mono text-xs text-slate-500" x-text="row.datetime"></td>
-            <td class="px-4 py-3 text-slate-700 text-xs" x-text="row.by"></td>
-            <td class="px-4 py-3">
-              <span class="font-mono font-semibold text-slate-800" x-text="row.ticker"></span>
-            </td>
-            <td class="px-4 py-3 text-slate-700" x-text="row.name"></td>
-            <td class="px-4 py-3">
-              <span
-                class="inline-block px-2 py-0.5 rounded text-xs font-semibold"
-                :class="row.market === 'KR'
-                  ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-blue-100 text-blue-700'"
-                x-text="row.market">
-              </span>
-            </td>
-            <td class="px-4 py-3 text-xs text-slate-500" x-text="row.group_name"></td>
-          </tr>
-        </template>
-      </tbody>
-    </table>
-  </div>
+        </thead>
+        <tbody>
+          <template x-if="filtered.length === 0">
+            <tr>
+              <td colspan="6" class="px-4 py-12 text-center text-slate-400 text-sm">이력이 없습니다.</td>
+            </tr>
+          </template>
+          <template x-for="(row, i) in filtered" :key="i">
+            <tr class="border-b last:border-0 hover:bg-slate-50 transition-colors">
+              <td class="px-4 py-3 font-mono text-xs text-slate-500" x-text="row.datetime"></td>
+              <td class="px-4 py-3 text-slate-700 text-xs" x-text="row.by"></td>
+              <td class="px-4 py-3">
+                <span class="font-mono font-semibold text-slate-800" x-text="row.ticker"></span>
+              </td>
+              <td class="px-4 py-3 text-slate-700" x-text="row.name"></td>
+              <td class="px-4 py-3">
+                <span
+                  class="inline-block px-2 py-0.5 rounded text-xs font-semibold"
+                  :class="row.market === 'KR'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-blue-100 text-blue-700'"
+                  x-text="row.market">
+                </span>
+              </td>
+              <td class="px-4 py-3 text-xs text-slate-500" x-text="row.group_name"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
 
-</div>
+  </div>{# /etfHistoryApp #}
+
+  {# ════════════════════════════════════════════════════════════
+     2. 구성종목 변동 이력 (KOSPI200 / SP500)
+     ════════════════════════════════════════════════════════════ #}
+  <h2 class="text-lg font-bold text-slate-700 mb-1 flex items-center gap-2">
+    구성종목 변동 이력
+    <span class="text-xs font-normal text-slate-400">KOSPI200 · S&amp;P500 진입 / 퇴출</span>
+  </h2>
+  <p class="text-xs text-slate-400 mb-4">매일 universe 갱신 시 직전 스냅샷과 비교해 감지된 변동 기록</p>
+
+  <div x-data="membershipApp()" x-init="init()">
+
+    {# 요약 카드 #}
+    <div class="flex gap-4 mb-6 flex-wrap">
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">총 변동 건수</div>
+        <div class="text-2xl font-bold text-slate-800" x-text="all.length + '건'"></div>
+      </div>
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">진입</div>
+        <div class="text-2xl font-bold text-emerald-600" x-text="countEntry + '건'"></div>
+      </div>
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">퇴출</div>
+        <div class="text-2xl font-bold text-rose-600" x-text="countExit + '건'"></div>
+      </div>
+    </div>
+
+    {# 필터 바 #}
+    <div class="bg-white border rounded-xl px-4 py-3 mb-4 flex gap-4 flex-wrap items-center shadow-sm">
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-slate-500 font-medium">지수</label>
+        <select x-model="filterGroup"
+                class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
+          <option value="">전체</option>
+          <option value="KOSPI200">KOSPI200</option>
+          <option value="SP500">S&amp;P500</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="text-xs text-slate-500 font-medium">이벤트</label>
+        <select x-model="filterEvent"
+                class="text-sm border border-slate-200 rounded px-2 py-1 bg-white focus:outline-none focus:ring-1 focus:ring-slate-400">
+          <option value="">전체</option>
+          <option value="진입">진입</option>
+          <option value="퇴출">퇴출</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2 ml-auto">
+        <span class="text-xs text-slate-400" x-text="filtered.length + '건 표시'"></span>
+      </div>
+    </div>
+
+    <div class="bg-white border rounded-xl shadow-sm overflow-hidden mb-12">
+      <table class="w-full text-sm" data-sortable>
+        <thead>
+          <tr class="bg-slate-50 border-b">
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-32">날짜</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-28">지수</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-24">이벤트</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-28">Ticker</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600">종목명</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-16">시장</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-if="filtered.length === 0">
+            <tr>
+              <td colspan="6" class="px-4 py-12 text-center text-slate-400 text-sm">변동 이력이 없습니다.</td>
+            </tr>
+          </template>
+          <template x-for="(row, i) in filtered" :key="i">
+            <tr class="border-b last:border-0 hover:bg-slate-50 transition-colors">
+              <td class="px-4 py-3 font-mono text-xs text-slate-500" x-text="row.date"></td>
+              <td class="px-4 py-3">
+                <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold"
+                  :class="row.group === 'KOSPI200'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-blue-100 text-blue-700'"
+                  x-text="row.group === 'SP500' ? 'S&P500' : row.group">
+                </span>
+              </td>
+              <td class="px-4 py-3">
+                <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold"
+                  :class="row.event_type === '진입'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-rose-50 text-rose-700 border border-rose-200'"
+                  x-text="row.event_type">
+                </span>
+              </td>
+              <td class="px-4 py-3">
+                <span class="font-mono font-semibold text-slate-800" x-text="row.ticker"></span>
+              </td>
+              <td class="px-4 py-3 text-slate-700" x-text="row.name || '-'"></td>
+              <td class="px-4 py-3">
+                <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold"
+                  :class="row.market === 'KR'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : 'bg-blue-100 text-blue-700'"
+                  x-text="row.market">
+                </span>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+  </div>{# /membershipApp #}
+
+  {# ════════════════════════════════════════════════════════════
+     3. 상장폐지 감지 이력
+     ════════════════════════════════════════════════════════════ #}
+  <h2 class="text-lg font-bold text-slate-700 mb-1 flex items-center gap-2">
+    상장폐지 감지 이력
+    <span class="text-xs font-normal text-slate-400">fetch 중 데이터 없음으로 탐지된 종목</span>
+  </h2>
+  <p class="text-xs text-slate-400 mb-4">yfinance 에서 "possibly delisted; no price data found" 경고가 발생한 ticker 목록</p>
+
+  <div x-data="delistedApp()" x-init="init()">
+
+    {# 요약 카드 #}
+    <div class="flex gap-4 mb-6 flex-wrap">
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">감지된 종목</div>
+        <div class="text-2xl font-bold text-slate-800" x-text="all.length + '건'"></div>
+      </div>
+      <div class="bg-white border rounded-xl px-6 py-4 shadow-sm">
+        <div class="text-xs text-slate-400 mb-1">최근 감지일</div>
+        <div class="text-lg font-bold text-rose-600" x-text="latestDate || '-'"></div>
+      </div>
+    </div>
+
+    <div class="bg-white border rounded-xl shadow-sm overflow-hidden mb-12">
+      <table class="w-full text-sm" data-sortable>
+        <thead>
+          <tr class="bg-slate-50 border-b">
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-32">감지 날짜</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-24">Ticker</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600">종목명</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-16">시장</th>
+            <th class="px-4 py-3 text-left font-semibold text-slate-600 w-28">그룹</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-if="all.length === 0">
+            <tr>
+              <td colspan="5" class="px-4 py-12 text-center text-slate-400 text-sm">감지된 상장폐지 종목이 없습니다.</td>
+            </tr>
+          </template>
+          <template x-for="(row, i) in all" :key="i">
+            <tr class="border-b last:border-0 hover:bg-slate-50 transition-colors">
+              <td class="px-4 py-3 font-mono text-xs text-slate-500" x-text="row.detected_date"></td>
+              <td class="px-4 py-3">
+                <span class="font-mono font-semibold text-rose-700" x-text="row.ticker"></span>
+              </td>
+              <td class="px-4 py-3 text-slate-700" x-text="row.name || '-'"></td>
+              <td class="px-4 py-3">
+                <span class="inline-block px-2 py-0.5 rounded text-xs font-semibold bg-blue-100 text-blue-700"
+                  x-text="row.market">
+                </span>
+              </td>
+              <td class="px-4 py-3 text-xs text-slate-500" x-text="row.group_name"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+
+  </div>{# /delistedApp #}
+
+</div>{# /main #}
 
 <script>
-function historyApp() {
+function etfHistoryApp() {
   return {
     all: HISTORY_DATA,
     filterMarket: '',
@@ -132,7 +313,7 @@ function historyApp() {
 
     get filtered() {
       return [...this.all]
-        .reverse()  // 최신순
+        .reverse()
         .filter(r => !this.filterMarket || r.market === this.filterMarket)
         .filter(r => !this.filterBy || r.by === this.filterBy);
     },
@@ -140,11 +321,37 @@ function historyApp() {
     get total() { return this.all.length; },
     get countKR() { return this.all.filter(r => r.market === 'KR').length; },
     get countUS() { return this.all.filter(r => r.market === 'US').length; },
-    get requestors() {
-      return [...new Set(this.all.map(r => r.by))].sort();
-    },
+    get requestors() { return [...new Set(this.all.map(r => r.by))].sort(); },
     get uniqueRequestors() { return this.requestors.length; },
+    init() {},
+  }
+}
 
+function membershipApp() {
+  return {
+    all: MEMBERSHIP_CHANGES,
+    filterGroup: '',
+    filterEvent: '',
+
+    get filtered() {
+      return this.all
+        .filter(r => !this.filterGroup || r.group === this.filterGroup)
+        .filter(r => !this.filterEvent || r.event_type === this.filterEvent);
+    },
+
+    get countEntry() { return this.all.filter(r => r.event_type === '진입').length; },
+    get countExit()  { return this.all.filter(r => r.event_type === '퇴출').length; },
+    init() {},
+  }
+}
+
+function delistedApp() {
+  return {
+    all: DELISTED_DATA,
+    get latestDate() {
+      if (!this.all.length) return '';
+      return this.all.reduce((a, b) => a.detected_date > b.detected_date ? a : b).detected_date;
+    },
     init() {},
   }
 }
