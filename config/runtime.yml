@@ -22,3 +22,6 @@ schedule:
 fetch:
   history_start: "2000-01-01"   # 신규 ticker 첫 fetch 시작일 (이 날짜부터 today까지)
   default_history_days: 9999    # fallback: history_start 미사용 시 (9999일 ≈ 27년)
+
+backtest:
+  workers: 8                    # ticker 병렬 처리 worker 수 (실제값 = min(workers, cpu_count))

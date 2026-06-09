@@ -356,7 +356,8 @@ def run(cfg: config.Config, type_names: list[str], market: str,
     n_types = len(type_names)
     _label = f"[{period}] " if period else ""
     _progress_step = max(1, min(10, total // 10))
-    n_workers = min(8, os.cpu_count() or 4)
+    _cfg_workers = int(cfg.runtime.get("backtest", {}).get("workers", 8))
+    n_workers = min(_cfg_workers, os.cpu_count() or 4)
 
     bt_root = paths.backtest_root(cfg.output_dir, period)
     bt_root.mkdir(parents=True, exist_ok=True)
