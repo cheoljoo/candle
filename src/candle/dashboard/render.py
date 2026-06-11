@@ -993,7 +993,45 @@ def _load_membership_changes(cfg: config.Config) -> list[dict]:
     try:
         df = csv_io.read(p)
         df = df.sort_values("date", ascending=False)
-        df["name"] = df["name"].fillna("") if "name" in df.columns else ""
+        if "name" not in df.columns:
+            df["name"] = ""
+        df["name"] = df["name"].fillna("").astype(str)
+        # KR ticker 선행 0 복원 (csv에서 int로 읽힌 경우 대비)
+        if "market" in df.columns:
+            kr_mask = df["market"] == "KR"
+            df.loc[kr_mask, "ticker"] = df.loc[kr_mask, "ticker"].astype(str).str.zfill(6)
+        # instruments.csv 에서 name 보강
+        try:
+            inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
+            name_map = dict(zip(inst["ticker"].astype(str), inst["name"].astype(str)))
+            mask = df["name"].str.strip() == ""
+            df.loc[mask, "name"] = df.loc[mask, "ticker"].astype(str).map(name_map).fillna("")
+        except Exception:
+            pass
+        # pykrx fallback — instruments.csv 에 없는 KR 종목명 보강
+        try:
+            from ..universe._quiet import quiet_pykrx
+            from pykrx import stock as _pykrx_stock
+            kr_mask = (df["name"].str.strip() == "") & (df.get("market", "") == "KR")
+            if "market" not in df.columns:
+                kr_mask = df["name"].str.strip() == ""
+            missing_tickers = df.loc[kr_mask, "ticker"].astype(str).unique().tolist()
+            if missing_tickers:
+                tk_name: dict[str, str] = {}
+                with quiet_pykrx():
+                    for t in missing_tickers:
+                        try:
+                            n = _pykrx_stock.get_market_ticker_name(t)
+                            if n:
+                                tk_name[t] = n
+                        except Exception:
+                            pass
+                if tk_name:
+                    df.loc[kr_mask, "name"] = df.loc[kr_mask, "ticker"].astype(str).map(
+                        lambda t: tk_name.get(t, "")
+                    )
+        except Exception:
+            pass
         return df.to_dict(orient="records")
     except Exception:
         return []
@@ -1017,9 +1055,10 @@ def _load_delisted(cfg: config.Config) -> list[dict]:
             inst = csv_io.read(paths.instruments_csv(cfg.data_dir))
             name_map = dict(zip(inst["ticker"].astype(str), inst["name"].astype(str)))
             mask = df["name"].isna() | (df["name"].astype(str).str.strip() == "")
+            df["name"] = df["name"].astype(str)
             df.loc[mask, "name"] = df.loc[mask, "ticker"].astype(str).map(name_map).fillna("")
         except Exception:
-            df["name"] = df["name"].fillna("")
+            df["name"] = df["name"].fillna("").astype(str)
 
         return df.to_dict(orient="records")
     except Exception:

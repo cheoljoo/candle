@@ -16,6 +16,10 @@ from . import etf, kospi200, sp500
 log = logging.getLogger(__name__)
 
 
+_STABLE_DAYS = 5   # 진입/퇴출 안정성 확인 기간 (거래일)
+_EXIT_DAYS = 20    # 퇴출 확정 연속 부재 기간 (거래일, ≈1개월)
+
+
 def _record_membership_changes(
     data_dir,
     group: str,
@@ -23,35 +27,87 @@ def _record_membership_changes(
     as_of: date,
     new_members: pd.DataFrame,
 ) -> int:
-    """이전 스냅샷과 비교해 진입/퇴출 변동을 membership_changes.csv 에 append."""
+    """이전 스냅샷과 비교해 진입/퇴출 변동을 membership_changes.csv 에 append.
+
+    노이즈 방지 기준:
+    - 퇴출: 최근 _EXIT_DAYS(≈1개월) 거래일 스냅샷에 단 한 번도 등장하지 않고 오늘도 없으며,
+            그 이전 _STABLE_DAYS 거래일 스냅샷 모두에 존재했던 종목.
+            최초 부재일 기준으로 단 1회 기록 (upsert 중복 방지).
+    - 진입: 과거 스냅샷 전체에 없었는데 오늘 처음 등장한 종목.
+    """
     changes_path = paths.membership_changes_csv(data_dir)
     mem_path = paths.membership_csv(data_dir, group)
 
-    # 직전 스냅샷 ticker set (오늘 이전 최신 날짜)
-    prev_tickers: set[str] = set()
-    prev_date: str = ""
-    if mem_path.exists():
-        mem = pd.read_csv(mem_path, dtype=str)
-        mem = mem[mem["from_date"] < as_of.isoformat()]
-        if not mem.empty:
-            prev_date = mem["from_date"].max()
-            prev_tickers = set(mem[mem["from_date"] == prev_date]["ticker"].tolist())
-
-    if not prev_tickers:
+    if not mem_path.exists():
         return 0  # 최초 실행 — 비교 대상 없음
 
+    mem = pd.read_csv(mem_path, dtype=str)
+    past = mem[mem["from_date"] < as_of.isoformat()]
+    if past.empty:
+        return 0
+
+    all_prev_dates = sorted(past["from_date"].unique())
+    ever_prev = set(past["ticker"].tolist())
     cur_tickers = set(new_members["ticker"].astype(str).tolist())
     name_map = dict(zip(new_members["ticker"].astype(str), new_members.get("name", pd.Series(dtype=str))))
 
+    # instruments.csv 에서 퇴출 종목 name 조회 (아직 instruments 갱신 전이므로 가능)
+    inst_name_map: dict[str, str] = {}
+    inst_p = data_dir / "instruments.csv"
+    if inst_p.exists():
+        try:
+            inst_df = pd.read_csv(inst_p, dtype=str)
+            inst_name_map = dict(zip(inst_df["ticker"].astype(str), inst_df["name"].astype(str)))
+        except Exception:
+            pass
+
+    # ── 진입 판정 ───────────────────────────────────────────────────────────
+    # 과거 스냅샷 전체에 없었는데 오늘 처음 등장한 종목
+    entered = sorted(cur_tickers - ever_prev)
+
+    # ── 퇴출 판정 (_EXIT_DAYS ≈ 1개월 연속 부재) ──────────────────────────
+    # _EXIT_DAYS + _STABLE_DAYS 일치의 스냅샷이 있어야 판정 가능
+    exited_with_dates: list[tuple[str, str]] = []  # (ticker, first_absent_date)
+    if len(all_prev_dates) >= _EXIT_DAYS + _STABLE_DAYS:
+        recent_dates = set(all_prev_dates[-_EXIT_DAYS:])
+        # 최근 _EXIT_DAYS 동안 단 한 번도 등장하지 않고 오늘도 없는 종목
+        ever_in_recent = set(past[past["from_date"].isin(recent_dates)]["ticker"].tolist())
+        absent_candidates = (ever_prev - ever_in_recent) - cur_tickers
+
+        # 그 이전 _STABLE_DAYS 거래일 스냅샷 모두에 안정적으로 존재했던 종목
+        pre_exit_dates = all_prev_dates[:-_EXIT_DAYS]
+        stable_dates = pre_exit_dates[-_STABLE_DAYS:]
+        stable_before: set[str] | None = None
+        for d in stable_dates:
+            day_set = set(past[past["from_date"] == d]["ticker"].tolist())
+            stable_before = day_set if stable_before is None else stable_before & day_set
+
+        for t in sorted(absent_candidates & (stable_before or set())):
+            # 최초 부재일: 마지막 등장일 직후 스냅샷 날짜 (upsert 중복 방지)
+            last_seen = past[past["ticker"] == t]["from_date"].max()
+            after = [d for d in all_prev_dates if d > last_seen]
+            first_absent = after[0] if after else as_of.isoformat()
+            exited_with_dates.append((t, first_absent))
+
+    # 변동 비율이 10% 이상이면 데이터 노이즈(fallback 오염)로 간주하고 기록 스킵
+    total = max(len(cur_tickers), 1)
+    noise_threshold = max(10, int(total * 0.10))
+    if len(entered) >= noise_threshold or len(exited_with_dates) >= noise_threshold:
+        log.warning(
+            f"{group} {as_of.isoformat()} 변동 {len(entered)}진입/{len(exited_with_dates)}퇴출 — "
+            f"임계치({noise_threshold}) 초과, 노이즈로 간주하여 기록 스킵"
+        )
+        return 0
+
     entries = [
         {"date": as_of.isoformat(), "group": group, "market": market,
-         "ticker": t, "name": name_map.get(t, ""), "event_type": "진입"}
-        for t in sorted(cur_tickers - prev_tickers)
+         "ticker": t, "name": name_map.get(t, "") or inst_name_map.get(t, ""), "event_type": "진입"}
+        for t in entered
     ]
     exits = [
-        {"date": as_of.isoformat(), "group": group, "market": market,
-         "ticker": t, "name": "", "event_type": "퇴출"}
-        for t in sorted(prev_tickers - cur_tickers)
+        {"date": first_absent, "group": group, "market": market,
+         "ticker": t, "name": inst_name_map.get(t, ""), "event_type": "퇴출"}
+        for t, first_absent in exited_with_dates
     ]
     rows = entries + exits
     if not rows:
